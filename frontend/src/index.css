@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-900 text-slate-300;
+  }
+}
+
+@layer components {
+  .glow-cyan {
+    box-shadow: 0 0 15px theme('colors.cyan.500' / 20%);
+  }
+  .glow-red {
+    box-shadow: 0 0 15px theme('colors.red.500' / 20%);
+  }
+  .glow-emerald {
+    box-shadow: 0 0 15px theme('colors.emerald.500' / 20%);
+  }
+  
+  .card {
+    @apply bg-slate-800 border border-slate-700 rounded-lg shadow-lg;
+  }
+}

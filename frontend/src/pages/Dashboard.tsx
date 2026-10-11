@@ -1,0 +1,120 @@
+import { useApi } from '../hooks/useApi';
+import { getDashboardStats, getRecentActivity, getVerificationHistory } from '../api/dashboard';
+import { MetricCard } from '../components/common/MetricCard';
+import { LoadingSpinner } from '../components/common/LoadingSpinner';
+import { ErrorMessage } from '../components/common/ErrorMessage';
+import { Server, Shield, CheckCircle, AlertTriangle, HelpCircle, Wrench } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+
+export const Dashboard = () => {
+  const { data: stats, loading: statsLoading, error: statsError, refetch: refetchStats } = useApi(getDashboardStats);
+  const { data: activity, loading: activityLoading } = useApi(() => getRecentActivity(10));
+  const { data: history, loading: historyLoading } = useApi(getVerificationHistory);
+
+  if (statsLoading) return <LoadingSpinner message="Loading dashboard statistics..." />;
+  if (statsError) return <ErrorMessage message={statsError.message} onRetry={refetchStats} />;
+
+  const PIE_COLORS = ['#10b981', '#ef4444', '#f59e0b', '#3b82f6'];
+
+  // Build trend data from verification history
+  const trendData = (history?.runs || []).slice(-10).map((run: { id: number; started_at: string; passed: number; failed: number; unknown: number }) => ({
+    name: new Date(run.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    pass: run.passed,
+    fail: run.failed,
+  }));
+
+  // Build violations pie data from stats
+  const violationsPie = stats ? [
+    { name: 'Passing', value: stats.passed },
+    { name: 'Violations', value: stats.failed },
+    { name: 'Unknown', value: stats.unknown },
+  ].filter(d => d.value > 0) : [];
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold text-white mb-6">Dashboard Overview</h1>
+      
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <MetricCard title="Total Devices" value={stats?.total_devices || 0} icon={Server} color="cyan" />
+        <MetricCard title="Active Policies" value={stats?.total_policies || 0} icon={Shield} color="cyan" />
+        <MetricCard title="Passing" value={stats?.passed || 0} icon={CheckCircle} color="emerald" />
+        <MetricCard title="Violations" value={stats?.failed || 0} icon={AlertTriangle} color="red" />
+        <MetricCard title="Unknown" value={stats?.unknown || 0} icon={HelpCircle} color="amber" />
+        <MetricCard title="Pending Repairs" value={stats?.pending_repairs || 0} icon={Wrench} color="amber" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+        <div className="card p-6 lg:col-span-2">
+          <h2 className="text-lg font-semibold mb-4">Verification Trends</h2>
+          {historyLoading ? <LoadingSpinner /> : trendData.length === 0 ? (
+            <div className="h-72 flex items-center justify-center text-slate-500">
+              No verification history yet. Run a verification to see trends.
+            </div>
+          ) : (
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} />
+                  <YAxis stroke="#94a3b8" fontSize={12} />
+                  <RechartsTooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+                  <Line type="monotone" dataKey="pass" stroke="#10b981" strokeWidth={2} name="Passing" dot={{ fill: '#10b981' }} />
+                  <Line type="monotone" dataKey="fail" stroke="#ef4444" strokeWidth={2} name="Failing" dot={{ fill: '#ef4444' }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+
+        <div className="card p-6">
+          <h2 className="text-lg font-semibold mb-4">Policy Status</h2>
+          {violationsPie.length === 0 ? (
+            <div className="h-72 flex items-center justify-center text-slate-500 text-sm">
+              No verification data yet
+            </div>
+          ) : (
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={violationsPie} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={5} dataKey="value" label>
+                    {violationsPie.map((_entry, index) => (
+                      <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <RechartsTooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} />
+                  <Legend wrapperStyle={{ color: '#94a3b8' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Recent Activity */}
+      <div className="card p-6">
+        <h2 className="text-lg font-semibold mb-4">Recent Activity</h2>
+        {activityLoading ? <LoadingSpinner /> : !activity || activity.length === 0 ? (
+          <div className="text-slate-500 text-sm py-4 text-center">No recent activity</div>
+        ) : (
+          <div className="space-y-3 max-h-64 overflow-y-auto">
+            {activity.map((event: { id: number; event_type: string; description: string; created_at: string }) => (
+              <div key={event.id} className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${
+                  event.event_type.includes('repair') ? 'bg-amber-400' :
+                  event.event_type.includes('verification') ? 'bg-cyan-400' :
+                  event.event_type.includes('intent') ? 'bg-blue-400' : 'bg-slate-400'
+                }`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-slate-200">{event.description}</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {new Date(event.created_at).toLocaleString()} · <span className="text-slate-400">{event.event_type}</span>
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
