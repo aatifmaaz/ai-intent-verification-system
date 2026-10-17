@@ -190,3 +190,39 @@ export interface SystemStatus {
   } | null;
 }
 
+export interface AutoEnforceStep {
+  step: number;
+  status: 'completed' | 'in_progress' | 'failed' | 'warning';
+  title: string;
+  detail: string;
+}
+
+export interface AutoEnforceResult {
+  status: 'REMEDIATED' | 'COMPLIANT' | 'FAIL' | 'UNKNOWN';
+  intent: {
+    id: number;
+    natural_language: string;
+    confidence?: number;
+  };
+  policies: Array<{
+    id: number;
+    type: string;
+    source: string;
+    dest: string;
+  }>;
+  repair?: {
+    id: number;
+    description: string;
+    affected_devices: string[];
+    original_config: Record<string, unknown>;
+    proposed_config: Record<string, unknown>;
+    change_type: string;
+  };
+  remediation_applied: boolean;
+  steps: AutoEnforceStep[];
+  initial_run?: { passed: number; failed: number };
+  final_run?: { passed: number; failed: number };
+  message: string;
+}
+
+

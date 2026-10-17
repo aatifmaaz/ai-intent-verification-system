@@ -48,3 +48,13 @@ def test_audit_logs_search():
     assert resp.status_code == 200
     logs = resp.json()
     assert isinstance(logs, list)
+
+def test_auto_enforce_intent():
+    resp = client.post("/api/intents/auto-enforce", json={
+        "natural_language": "The guest network must not communicate with the HR network."
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] in ["REMEDIATED", "COMPLIANT"]
+    assert len(data["steps"]) >= 3
+

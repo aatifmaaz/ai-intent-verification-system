@@ -28,3 +28,11 @@ export const updateIntent = async (id: number, naturalLanguage: string): Promise
 export const deleteIntent = async (id: number): Promise<void> => {
   await apiClient.delete(`/api/intents/${id}`);
 };
+
+export const autoEnforceIntent = async (naturalLanguage: string) => {
+  const response = await apiClient.post('/api/intents/auto-enforce', {
+    natural_language: naturalLanguage,
+  });
+  return response.data;
+};
+

@@ -23,7 +23,15 @@ class NetworkGraph:
             self.graph.add_edge(link.target_device_id, link.source_device_id, link=link) # Assuming bidirectional links
             
     def get_devices_in_zone(self, zone):
-        return [node for node, data in self.graph.nodes(data=True) if data.get('zone') == zone]
+        if not zone:
+            return []
+        z_clean = str(zone).lower().strip()
+        matches = [node for node, data in self.graph.nodes(data=True) if data.get('zone') and (data.get('zone').lower() == z_clean or data.get('zone').lower() in z_clean or z_clean in data.get('zone').lower())]
+        if not matches:
+            # Check device names or aliases
+            matches = [node for node, data in self.graph.nodes(data=True) if data.get('name') and (data.get('name').lower() in z_clean or z_clean in data.get('name').lower())]
+        return matches
+
 
     def is_subnet_match(self, ip_or_subnet, acl_network):
         if acl_network == "any" or ip_or_subnet == "any":
