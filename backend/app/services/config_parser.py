@@ -3,15 +3,17 @@ import yaml
 import re
 
 class ConfigParser:
-    def parse(self, raw_content, fmt):
-        if fmt.lower() == 'json':
+    def parse(self, raw_content, fmt="json", format=None):
+        target_fmt = format or fmt or "json"
+        if target_fmt.lower() == 'json':
             return self.parse_json(raw_content)
-        elif fmt.lower() == 'yaml':
+        elif target_fmt.lower() == 'yaml':
             return self.parse_yaml(raw_content)
-        elif fmt.lower() in ['ios', 'cisco']:
+        elif target_fmt.lower() in ['ios', 'cisco']:
             return self.parse_ios(raw_content)
         else:
-            raise ValueError(f"Unsupported format: {fmt}")
+            raise ValueError(f"Unsupported format: {target_fmt}")
+
 
     def parse_json(self, content):
         try:

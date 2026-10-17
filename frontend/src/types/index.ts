@@ -97,6 +97,7 @@ export interface RepairProposal {
   approved_at: string | null;
   applied_at: string | null;
   rolled_back_at: string | null;
+  created_at?: string | null;
 }
 
 export interface DashboardStats {
@@ -122,13 +123,70 @@ export interface Scenario {
   name: string;
   description: string;
   category: string;
+  severity: string;
+  affected_zones?: string[];
+  target_devices?: string[];
   expected_result: string;
+  attack_vector?: string;
 }
 
 export interface ScenarioResult {
   scenario_id: string;
-  scenario_name: string;
-  status: string;
-  verification_results: VerificationFinding[];
-  details: Record<string, unknown>;
+  scenario?: Scenario;
+  expected?: string;
+  findings: Array<{
+    status: 'PASS' | 'FAIL' | 'UNKNOWN';
+    details?: string;
+    remediation?: string;
+  }>;
+  conflicts?: unknown[];
 }
+
+export interface NetworkConfiguration {
+  id: number;
+  device_id: number;
+  format: 'json' | 'yaml' | 'ios';
+  raw_content: string;
+  normalized_content: Record<string, unknown>;
+  version: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface ConfigurationVersion {
+  id: number;
+  version_number: number;
+  change_description: string;
+  created_at: string;
+  config_data: Record<string, unknown>;
+}
+
+export interface DeviceConfigDetail {
+  device_id: number;
+  device_name: string;
+  device_type: string;
+  current_config: Record<string, unknown> | null;
+  active_configuration: NetworkConfiguration | null;
+  history: NetworkConfiguration[];
+  versions: ConfigurationVersion[];
+}
+
+export interface SystemStatus {
+  status: string;
+  engine_version: string;
+  mode: string;
+  devices_count: number;
+  links_count: number;
+  intents_count: number;
+  configurations_count: number;
+  pending_repairs: number;
+  last_verification: {
+    id: number | null;
+    status: string;
+    passed: number;
+    failed: number;
+    unknown: number;
+    completed_at: string | null;
+  } | null;
+}
+

@@ -1,9 +1,10 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { getVerificationResults, runVerification, proposeRepair } from '../api/verification';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { ErrorMessage } from '../components/common/ErrorMessage';
-import { Play, ShieldCheck, ShieldAlert, CheckCircle, HelpCircle, ChevronDown, ChevronRight, Wrench, Filter } from 'lucide-react';
+import { Play, ShieldCheck, ShieldAlert, CheckCircle, HelpCircle, ChevronDown, ChevronRight, Wrench, Filter, ArrowRight } from 'lucide-react';
 import { VerificationRun, VerificationFinding } from '../types';
 
 export const VerificationCenter = () => {
@@ -13,9 +14,11 @@ export const VerificationCenter = () => {
   const [expandedFinding, setExpandedFinding] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [proposingRepair, setProposingRepair] = useState<number | null>(null);
+  const [repairSuccessNotice, setRepairSuccessNotice] = useState<{ id: number; message: string } | null>(null);
 
   const handleRunVerification = async () => {
     setIsRunning(true);
+    setRepairSuccessNotice(null);
     try {
       const result = await runVerification();
       setLatestRun(result);
@@ -29,9 +32,13 @@ export const VerificationCenter = () => {
 
   const handleProposeRepair = async (findingId: number) => {
     setProposingRepair(findingId);
+    setRepairSuccessNotice(null);
     try {
-      await proposeRepair(findingId);
-      alert('Repair proposal created successfully. View it in the Repair Center.');
+      const proposal = await proposeRepair(findingId);
+      setRepairSuccessNotice({
+        id: proposal?.id || findingId,
+        message: 'Minimal repair patch generated successfully!'
+      });
     } catch (err) {
       console.error(err);
       alert('Failed to create repair proposal.');
@@ -39,6 +46,7 @@ export const VerificationCenter = () => {
       setProposingRepair(null);
     }
   };
+
 
   if (loading) return <LoadingSpinner message="Loading verification results..." />;
   if (error) return <ErrorMessage message={error.message} onRetry={refetch} />;
@@ -71,7 +79,27 @@ export const VerificationCenter = () => {
         </button>
       </div>
 
+      {repairSuccessNotice && (
+        <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md shadow-emerald-500/10">
+          <div className="flex items-center gap-3">
+            <CheckCircle className="w-5 h-5 flex-shrink-0 text-emerald-400" />
+            <div>
+              <div className="text-sm font-semibold">{repairSuccessNotice.message}</div>
+              <div className="text-xs text-slate-400 font-mono">Proposal #{repairSuccessNotice.id} ready for sandbox validation and deployment.</div>
+            </div>
+          </div>
+          <Link
+            to="/repairs"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-all"
+          >
+            Review &amp; Apply in Repairs Center
+            <ArrowRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+      )}
+
       {/* Summary bar */}
+
       {displayRun && (
         <div className="grid grid-cols-4 gap-4">
           <div className="card p-4 text-center">

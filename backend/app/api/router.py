@@ -27,3 +27,39 @@ api_router.include_router(auth_router, prefix="/auth", tags=["Auth"])
 def get_dashboard_stats(db: Session = Depends(get_db)):
     return dashboard_stats(db)
 
+@api_router.get("/system/status", tags=["System"])
+def get_system_status(db: Session = Depends(get_db)):
+    from app.models.device import Device
+    from app.models.intent import Intent
+    from app.models.network_link import NetworkLink
+    from app.models.verification import VerificationRun
+    from app.models.repair import RepairProposal
+    from app.models.configuration import NetworkConfiguration
+
+    device_count = db.query(Device).count()
+    link_count = db.query(NetworkLink).count()
+    intent_count = db.query(Intent).count()
+    config_count = db.query(NetworkConfiguration).count()
+    last_run = db.query(VerificationRun).order_by(VerificationRun.started_at.desc()).first()
+    pending_repairs = db.query(RepairProposal).filter(RepairProposal.approval_status == "pending").count()
+
+    return {
+        "status": "healthy",
+        "engine_version": "2.4.0-simulation",
+        "mode": "Deterministic Graph + NLP",
+        "devices_count": device_count,
+        "links_count": link_count,
+        "intents_count": intent_count,
+        "configurations_count": config_count,
+        "pending_repairs": pending_repairs,
+        "last_verification": {
+            "id": last_run.id if last_run else None,
+            "status": last_run.status if last_run else "never_run",
+            "passed": last_run.passed if last_run else 0,
+            "failed": last_run.failed if last_run else 0,
+            "unknown": last_run.unknown if last_run else 0,
+            "completed_at": last_run.completed_at.isoformat() if last_run and last_run.completed_at else None
+        } if last_run else None
+    }
+
+

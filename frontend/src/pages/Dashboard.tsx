@@ -43,6 +43,62 @@ export const Dashboard = () => {
         <MetricCard title="Pending Repairs" value={stats?.pending_repairs || 0} icon={Wrench} color="amber" />
       </div>
 
+      {/* Quick Launchpad */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <a
+          href="/verification"
+          className="card p-3.5 hover:border-cyan-500/50 transition-all flex items-center gap-3 group"
+        >
+          <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 group-hover:scale-110 transition-transform">
+            <Shield className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-white group-hover:text-cyan-400 transition-colors">Run Verification</div>
+            <div className="text-[11px] text-slate-400">Verify graph reachability</div>
+          </div>
+        </a>
+
+        <a
+          href="/repairs"
+          className="card p-3.5 hover:border-amber-500/50 transition-all flex items-center gap-3 group"
+        >
+          <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400 group-hover:scale-110 transition-transform">
+            <Wrench className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-white group-hover:text-amber-400 transition-colors">Repair Center</div>
+            <div className="text-[11px] text-slate-400">Review &amp; apply patches</div>
+          </div>
+        </a>
+
+        <a
+          href="/simulation"
+          className="card p-3.5 hover:border-purple-500/50 transition-all flex items-center gap-3 group"
+        >
+          <div className="p-2 rounded-lg bg-purple-500/10 text-purple-400 group-hover:scale-110 transition-transform">
+            <Server className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-white group-hover:text-purple-400 transition-colors">Simulation Lab</div>
+            <div className="text-[11px] text-slate-400">Test Scenarios A - E</div>
+          </div>
+        </a>
+
+        <a
+          href="/configurations"
+          className="card p-3.5 hover:border-blue-500/50 transition-all flex items-center gap-3 group"
+        >
+          <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400 group-hover:scale-110 transition-transform">
+            <Server className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-white group-hover:text-blue-400 transition-colors">Device Configs</div>
+            <div className="text-[11px] text-slate-400">Inspect &amp; validate syntax</div>
+          </div>
+        </a>
+      </div>
+
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
         <div className="card p-6 lg:col-span-2">
           <h2 className="text-lg font-semibold mb-4">Verification Trends</h2>
