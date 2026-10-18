@@ -28,3 +28,45 @@ export const createLink = async (link: Partial<NetworkLink>): Promise<NetworkLin
 export const deleteLink = async (id: number): Promise<void> => {
   await apiClient.delete(`/api/topology/links/${id}`);
 };
+
+export interface TopologyTemplate {
+  id: string;
+  name: string;
+  description: string;
+  device_count: number;
+  link_count: number;
+  sample_intents: string[];
+}
+
+export const getTopologyTemplates = async (): Promise<TopologyTemplate[]> => {
+  const response = await apiClient.get('/api/topology/templates');
+  return response.data;
+};
+
+export const loadTopologyTemplate = async (templateId: string): Promise<{
+  status: string;
+  template: string;
+  devices_count: number;
+  links_count: number;
+  message: string;
+}> => {
+  const response = await apiClient.post(`/api/topology/templates/${templateId}/load`);
+  return response.data;
+};
+
+export const importCustomTopology = async (topologyData: {
+  name?: string;
+  devices: Array<Record<string, unknown>>;
+  links: Array<Record<string, unknown>>;
+  intents?: string[];
+}): Promise<{
+  status: string;
+  name: string;
+  devices_count: number;
+  links_count: number;
+  message: string;
+}> => {
+  const response = await apiClient.post('/api/topology/import', topologyData);
+  return response.data;
+};
+

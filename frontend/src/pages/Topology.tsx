@@ -20,9 +20,11 @@ import {
   Layers,
   Activity,
   Shield,
-  Radio
+  Radio,
+  Sparkles
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { TopologyManagerModal } from '../components/TopologyManagerModal';
 
 interface NodePos {
   id: number;
@@ -53,10 +55,12 @@ export const Topology: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [animatingTraffic, setAnimatingTraffic] = useState(true);
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('tiered');
+  const [isTopologyModalOpen, setIsTopologyModalOpen] = useState(false);
   
   // Transform: Pan and Zoom
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState<number>(1);
+
 
   const positionsRef = useRef<Map<number, NodePos>>(new Map());
   const animationFrameRef = useRef<number | null>(null);
@@ -578,6 +582,15 @@ export const Topology: React.FC = () => {
             <RotateCcw className="w-3.5 h-3.5" />
             Reset Layout
           </button>
+
+          <button
+            onClick={() => setIsTopologyModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-lg shadow-md shadow-cyan-600/30 transition-all border border-cyan-400/30 hover:scale-[1.02] active:scale-[0.98]"
+            title="Switch templates or import a completely new custom network topology"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-cyan-200" />
+            <span>Switch / Import Topology</span>
+          </button>
         </div>
       </div>
 
@@ -692,7 +705,7 @@ export const Topology: React.FC = () => {
                 Graph Inspector
               </h2>
               <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
-                15 Nodes Online
+                {devices.length} Nodes Online
               </span>
             </div>
 
@@ -792,6 +805,16 @@ export const Topology: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Switch / Import Topology Studio Modal */}
+      <TopologyManagerModal
+        isOpen={isTopologyModalOpen}
+        onClose={() => setIsTopologyModalOpen(false)}
+        onTopologyChanged={() => {
+          refetch();
+          handleResetView();
+        }}
+      />
     </div>
   );
 };
