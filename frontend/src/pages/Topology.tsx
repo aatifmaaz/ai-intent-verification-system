@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useApi } from '../hooks/useApi';
-import { getTopology } from '../api/topology';
+import { getTopology, getTopologySuggestions, TopologySuggestions } from '../api/topology';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { ErrorMessage } from '../components/common/ErrorMessage';
 import { Device, NetworkLink } from '../types';
@@ -21,10 +21,12 @@ import {
   Activity,
   Shield,
   Radio,
-  Sparkles
+  Sparkles,
+  Zap
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { TopologyManagerModal } from '../components/TopologyManagerModal';
+import { AutoPilotModal } from '../components/AutoPilotModal';
 
 interface NodePos {
   id: number;
@@ -56,6 +58,15 @@ export const Topology: React.FC = () => {
   const [animatingTraffic, setAnimatingTraffic] = useState(true);
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('tiered');
   const [isTopologyModalOpen, setIsTopologyModalOpen] = useState(false);
+  const [suggestionsData, setSuggestionsData] = useState<TopologySuggestions | null>(null);
+  const [isAutoPilotOpen, setIsAutoPilotOpen] = useState(false);
+  const [autoPilotPrompt, setAutoPilotPrompt] = useState('');
+
+  useEffect(() => {
+    getTopologySuggestions()
+      .then(setSuggestionsData)
+      .catch(() => {});
+  }, [data]);
   
   // Transform: Pan and Zoom
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -627,6 +638,43 @@ export const Topology: React.FC = () => {
         </div>
       </div>
 
+      {/* Recommended Enforcements Banner for Active Blueprint */}
+      {suggestionsData && suggestionsData.suggestions && suggestionsData.suggestions.length > 0 && (
+        <div className="card p-3 bg-gradient-to-r from-slate-900 via-cyan-950/25 to-slate-900 border border-cyan-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-lg shadow-cyan-950/20 animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <div className="w-6 h-6 rounded-md bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
+              <Zap className="w-3.5 h-3.5 fill-cyan-400" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-white tracking-wide flex items-center gap-1.5">
+                Recommended Enforcements for <span className="text-cyan-300 font-bold">{suggestionsData.template_name}:</span>
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono block">
+                Click any real-world requirement to test instant autonomous enforcement
+              </span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5 w-full md:w-auto">
+            {suggestionsData.suggestions.slice(0, 3).map((sugg, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => {
+                  setAutoPilotPrompt(sugg);
+                  setIsAutoPilotOpen(true);
+                }}
+                className="px-2.5 py-1 text-xs rounded-lg bg-cyan-950/40 hover:bg-cyan-900/60 text-cyan-300 hover:text-white border border-cyan-500/30 hover:border-cyan-400 transition-all font-mono text-left flex items-center gap-1.5 hover:scale-[1.02] active:scale-[0.98]"
+                title="Click to run Auto-Pilot enforcement on this network"
+              >
+                <Sparkles className="w-3 h-3 text-cyan-400 flex-shrink-0" />
+                <span className="truncate max-w-[280px]">"{sugg}"</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Topology Canvas + Detail Drawer */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Canvas Area */}
@@ -813,6 +861,18 @@ export const Topology: React.FC = () => {
         onTopologyChanged={() => {
           refetch();
           handleResetView();
+          getTopologySuggestions().then(setSuggestionsData).catch(() => {});
+        }}
+      />
+
+      {/* Autonomous Auto-Pilot Modal */}
+      <AutoPilotModal
+        isOpen={isAutoPilotOpen}
+        onClose={() => setIsAutoPilotOpen(false)}
+        defaultPrompt={autoPilotPrompt}
+        onSuccess={() => {
+          refetch();
+          getTopologySuggestions().then(setSuggestionsData).catch(() => {});
         }}
       />
     </div>

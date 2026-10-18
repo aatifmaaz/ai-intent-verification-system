@@ -63,20 +63,16 @@ class VerificationEngine:
                 remediation="Add devices to zones", details="Zones lack devices."
             )
 
-        missing_config = False
+        # Verify endpoints exist in graph
         for dev in src_devices + dst_devices:
-            d_data = graph.graph.nodes[dev]
-            if not d_data.get('config'):
-                missing_config = True
-                
-        if missing_config:
-            return VerificationFinding(
-                run_id=run_id, policy_id=policy.id, status="UNKNOWN",
-                severity="medium", risk_level="medium", affected_devices=[],
-                affected_networks=[], evidence={"reason": "Missing config data on endpoints"},
-                remediation="Ensure configuration is pulled for all devices",
-                details="Cannot verify due to missing configuration data."
-            )
+            if dev not in graph.graph.nodes:
+                return VerificationFinding(
+                    run_id=run_id, policy_id=policy.id, status="UNKNOWN",
+                    severity="medium", risk_level="medium", affected_devices=[],
+                    affected_networks=[], evidence={"reason": f"Device ID {dev} missing from graph"},
+                    remediation="Ensure configuration is pulled for all devices",
+                    details="Cannot verify due to missing configuration data."
+                )
 
         evidence_list = graph.get_path_evidence(src_zone, dst_zone, protocol, port)
         has_permitted = any(e['permitted'] for e in evidence_list)

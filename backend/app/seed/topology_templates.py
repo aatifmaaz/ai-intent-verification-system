@@ -63,7 +63,10 @@ TOPOLOGY_TEMPLATES: Dict[str, Dict[str, Any]] = {
         ],
         "sample_intents": [
             "The guest network must not communicate with the HR network.",
-            "All devices in the engineering network must be able to access the internal application server."
+            "All devices in the engineering network must be able to access the internal application server.",
+            "Block guest network from accessing the database server.",
+            "Isolate database from guest.",
+            "Only management may access core router using SSH."
         ]
     },
 
@@ -105,7 +108,10 @@ TOPOLOGY_TEMPLATES: Dict[str, Dict[str, Any]] = {
         ],
         "sample_intents": [
             "External traffic must not directly access the postgres cluster.",
-            "Only the bastion host may access the k8s control plane using SSH."
+            "Only the bastion host may access the k8s control plane using SSH.",
+            "Isolate redis cache from ingress proxy.",
+            "Shut off access from internet to database.",
+            "Compute cluster must not access border firewall management port."
         ]
     },
 
@@ -140,7 +146,10 @@ TOPOLOGY_TEMPLATES: Dict[str, Dict[str, Any]] = {
         ],
         "sample_intents": [
             "Visitor patient wifi must not communicate with the EHR database.",
-            "Medical IoT devices must remain isolated from visitor wifi."
+            "Medical IoT devices must remain isolated from visitor wifi.",
+            "Block infusion pumps from accessing billing server.",
+            "Prevent visitor patient wifi from reaching ICU nurses station.",
+            "Keep the EHR database private from patient wifi."
         ]
     },
 
@@ -175,7 +184,10 @@ TOPOLOGY_TEMPLATES: Dict[str, Dict[str, Any]] = {
         ],
         "sample_intents": [
             "Payment API gateway must not communicate directly with the cardholder vault database.",
-            "Only admin jump host may access core banking switch using SSH."
+            "Only admin jump host may access core banking switch using SSH.",
+            "Isolate cardholder vault from public internet.",
+            "Do not allow ATM transaction switch to communicate with teller workstations.",
+            "Keep the cardholder vault database private from payment API gateway."
         ]
     }
 }

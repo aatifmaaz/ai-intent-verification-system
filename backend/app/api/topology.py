@@ -384,4 +384,57 @@ def import_custom_topology(topo_in: CustomTopologyImport, db: Session = Depends(
         "message": f"Successfully imported '{topo_in.name}' with {len(dev_objs)} devices and {len(topo_in.intents or [])} intents!"
     }
 
+@router.get("/suggestions")
+def get_topology_suggestions(db: Session = Depends(get_db)):
+    """Detect active network architecture and return context-tailored enforcement recommendations."""
+    from app.seed.topology_templates import TOPOLOGY_TEMPLATES
+    devices = db.query(Device).all()
+    device_names = {d.name.lower() for d in devices}
+    zones = list(set(d.zone.lower() for d in devices if d.zone))
+
+    # Detect template
+    detected_id = "custom"
+    template_name = "Custom Dynamic Mesh"
+    suggestions = []
+
+    if any(n in device_names for n in ["mri-scanner", "ehr-database", "infusion-pumps"]):
+        detected_id = "healthcare"
+        template_name = TOPOLOGY_TEMPLATES["healthcare"]["name"]
+        suggestions = TOPOLOGY_TEMPLATES["healthcare"]["sample_intents"]
+    elif any(n in device_names for n in ["spine-switch-01", "k8s-control-plane", "postgres-cluster"]):
+        detected_id = "datacenter"
+        template_name = TOPOLOGY_TEMPLATES["datacenter"]["name"]
+        suggestions = TOPOLOGY_TEMPLATES["datacenter"]["sample_intents"]
+    elif any(n in device_names for n in ["cardholder-vault-db", "pci-dss-firewall", "border-pci-gateway"]):
+        detected_id = "fintech"
+        template_name = TOPOLOGY_TEMPLATES["fintech"]["name"]
+        suggestions = TOPOLOGY_TEMPLATES["fintech"]["sample_intents"]
+    elif any(n in device_names for n in ["distribution-switch-1", "hr-server", "eng-server"]):
+        detected_id = "enterprise"
+        template_name = TOPOLOGY_TEMPLATES["enterprise"]["name"]
+        suggestions = TOPOLOGY_TEMPLATES["enterprise"]["sample_intents"]
+    else:
+        # Dynamic suggestions synthesized from custom topology zones
+        if len(zones) >= 2:
+            src_z = zones[0]
+            dst_z = zones[1]
+            suggestions = [
+                f"Isolate {src_z} from {dst_z}.",
+                f"Block all traffic from {src_z} to {dst_z}.",
+                f"Ensure {dst_z} remains strictly protected from {src_z}.",
+                f"Keep {dst_z} private from {src_z} network."
+            ]
+        else:
+            suggestions = [
+                "Enforce zero trust perimeter isolation across all zones.",
+                "Block external untrusted traffic from reaching internal databases."
+            ]
+
+    return {
+        "active_template": detected_id,
+        "template_name": template_name,
+        "devices_count": len(devices),
+        "suggestions": suggestions
+    }
+
 

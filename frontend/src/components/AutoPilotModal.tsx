@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Zap, 
   Sparkles, 
@@ -9,10 +9,12 @@ import {
   ArrowRight, 
   X, 
   ShieldCheck, 
-  AlertCircle 
+  AlertCircle,
+  Network
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { autoEnforceIntent } from '../api/intents';
+import { getTopologySuggestions, TopologySuggestions } from '../api/topology';
 import type { AutoEnforceResult } from '../types';
 
 interface AutoPilotModalProps {
@@ -22,7 +24,7 @@ interface AutoPilotModalProps {
   onSuccess?: () => void;
 }
 
-const PRESET_INTENTS = [
+const DEFAULT_PRESET_INTENTS = [
   "Stop guest from reaching HR",
   "The guest network must not communicate with the HR network.",
   "Isolate database from guest",
@@ -37,11 +39,25 @@ export const AutoPilotModal: React.FC<AutoPilotModalProps> = ({
   defaultPrompt = '',
   onSuccess
 }) => {
-  const [prompt, setPrompt] = useState(defaultPrompt || PRESET_INTENTS[0]);
+  const [prompt, setPrompt] = useState(defaultPrompt || DEFAULT_PRESET_INTENTS[0]);
   const [isRunning, setIsRunning] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const [result, setResult] = useState<AutoEnforceResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [suggestionsData, setSuggestionsData] = useState<TopologySuggestions | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      getTopologySuggestions()
+        .then((data) => {
+          setSuggestionsData(data);
+          if (!defaultPrompt && data.suggestions && data.suggestions.length > 0) {
+            setPrompt(data.suggestions[0]);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isOpen, defaultPrompt]);
 
   if (!isOpen) return null;
 
@@ -136,15 +152,33 @@ export const AutoPilotModal: React.FC<AutoPilotModalProps> = ({
           </div>
 
           {/* Quick Preset Badges */}
-          <div className="space-y-1.5">
-            <div className="text-[11px] font-semibold text-slate-400">Or click a real-world requirement to test instantly:</div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-slate-300 flex items-center gap-1.5">
+                <Network className="w-3.5 h-3.5 text-cyan-400" />
+                Recommended for <span className="text-cyan-300 font-bold">{suggestionsData?.template_name || 'Current Topology'}:</span>
+              </span>
+              {suggestionsData && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                  {suggestionsData.devices_count} nodes online
+                </span>
+              )}
+            </div>
+
             <div className="flex flex-wrap gap-1.5">
-              {PRESET_INTENTS.map((item, idx) => (
+              {(suggestionsData?.suggestions && suggestionsData.suggestions.length > 0 
+                ? suggestionsData.suggestions 
+                : DEFAULT_PRESET_INTENTS
+              ).map((item, idx) => (
                 <button
                   key={idx}
                   type="button"
                   onClick={() => setPrompt(item)}
-                  className="px-2.5 py-1 text-xs rounded-lg bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-700/60 hover:border-cyan-500/40 transition-colors font-mono text-left"
+                  className={`px-2.5 py-1 text-xs rounded-lg transition-all font-mono text-left border ${
+                    prompt === item
+                      ? 'bg-cyan-500/20 text-cyan-200 border-cyan-500/50 shadow-sm shadow-cyan-500/20'
+                      : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border-slate-700/60 hover:border-cyan-500/40'
+                  }`}
                 >
                   "{item}"
                 </button>

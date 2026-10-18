@@ -70,3 +70,16 @@ export const importCustomTopology = async (topologyData: {
   return response.data;
 };
 
+export interface TopologySuggestions {
+  active_template: string;
+  template_name: string;
+  devices_count: number;
+  suggestions: string[];
+}
+
+export const getTopologySuggestions = async (): Promise<TopologySuggestions> => {
+  const response = await apiClient.get('/api/topology/suggestions');
+  return response.data;
+};
+
+

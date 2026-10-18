@@ -17,10 +17,26 @@ class RepairEngine:
         ptype = policy.policy_type.lower()
         
         # Get one of the affected devices (typically firewall or router in path)
+        # Select optimal enforcement point along path (firewall > router > switch)
         target_device = None
         if finding.affected_devices:
-            dev_name = finding.affected_devices[0] # Simplification
-            target_device = self.db.query(Device).filter(Device.name == dev_name).first()
+            candidates = self.db.query(Device).filter(Device.name.in_(finding.affected_devices)).all()
+            firewalls = [d for d in candidates if d.device_type == 'firewall']
+            routers = [d for d in candidates if d.device_type == 'router']
+            switches = [d for d in candidates if d.device_type == 'switch']
+            if firewalls:
+                target_device = firewalls[0]
+            elif routers:
+                target_device = routers[0]
+            elif switches:
+                target_device = switches[0]
+            elif candidates:
+                target_device = candidates[0]
+
+        if not target_device:
+            target_device = self.db.query(Device).filter(Device.device_type == 'firewall').first() or \
+                            self.db.query(Device).filter(Device.device_type == 'router').first() or \
+                            self.db.query(Device).first()
             
         if not target_device:
             return None
