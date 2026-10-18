@@ -4,8 +4,9 @@ import { useApi } from '../hooks/useApi';
 import { getVerificationResults, runVerification, proposeRepair } from '../api/verification';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { ErrorMessage } from '../components/common/ErrorMessage';
-import { Play, ShieldCheck, ShieldAlert, CheckCircle, HelpCircle, ChevronDown, ChevronRight, Wrench, Filter, ArrowRight } from 'lucide-react';
+import { Play, ShieldCheck, ShieldAlert, CheckCircle, HelpCircle, ChevronDown, ChevronRight, Wrench, Filter, ArrowRight, Zap, Sparkles } from 'lucide-react';
 import { VerificationRun, VerificationFinding } from '../types';
+import { AutoPilotModal } from '../components/AutoPilotModal';
 
 export const VerificationCenter = () => {
   const { data: runs, loading, error, refetch } = useApi(getVerificationResults);
@@ -15,6 +16,9 @@ export const VerificationCenter = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [proposingRepair, setProposingRepair] = useState<number | null>(null);
   const [repairSuccessNotice, setRepairSuccessNotice] = useState<{ id: number; message: string } | null>(null);
+  const [isAutoPilotOpen, setIsAutoPilotOpen] = useState(false);
+  const [autoPilotPrompt, setAutoPilotPrompt] = useState('Stop guest from reaching HR');
+
 
   const handleRunVerification = async () => {
     setIsRunning(true);
@@ -58,26 +62,94 @@ export const VerificationCenter = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-white">Verification Center</h1>
-        <button
-          onClick={handleRunVerification}
-          disabled={isRunning}
-          className="flex items-center px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md transition-colors disabled:opacity-50"
-        >
-          {isRunning ? (
-            <>
-              <div className="w-4 h-4 mr-2 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Running...
-            </>
-          ) : (
-            <>
-              <Play className="w-4 h-4 mr-2" />
-              Run Verification
-            </>
-          )}
-        </button>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2.5">
+            <ShieldCheck className="w-7 h-7 text-emerald-400" />
+            Verification Center
+          </h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Real-time graph reachability and formal ACL security policy audit.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsAutoPilotOpen(true)}
+            className="flex items-center px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-lg shadow-md transition-all"
+          >
+            <Zap className="w-4 h-4 mr-1.5 fill-white" />
+            Auto-Pilot Enforce
+          </button>
+
+          <button
+            onClick={handleRunVerification}
+            disabled={isRunning}
+            className="flex items-center px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
+          >
+            {isRunning ? (
+              <>
+                <div className="w-3.5 h-3.5 mr-2 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                Auditing Mesh...
+              </>
+            ) : (
+              <>
+                <Play className="w-3.5 h-3.5 mr-2 fill-white" />
+                Run Verification
+              </>
+            )}
+          </button>
+        </div>
       </div>
+
+      {/* Autonomous AI Self-Healing Quick Bar */}
+      <div className="card p-5 bg-gradient-to-r from-slate-900 via-cyan-950/25 to-slate-900 border-cyan-500/30 shadow-xl space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <Sparkles className="w-4 h-4 text-cyan-400" />
+            <span className="text-xs font-bold text-white uppercase tracking-wider">
+              Autonomous Requirement Auto-Enforcer
+            </span>
+          </div>
+          <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">
+            0-Step Manual Intervention
+          </span>
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-center gap-2.5">
+          <input
+            type="text"
+            value={autoPilotPrompt}
+            onChange={(e) => setAutoPilotPrompt(e.target.value)}
+            placeholder="Type any plain English rule (e.g. 'Stop guest from reaching HR')..."
+            className="w-full px-3.5 py-2 bg-slate-950 border border-slate-700/80 rounded-lg text-xs font-mono text-cyan-300 placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+          />
+          <button
+            onClick={() => setIsAutoPilotOpen(true)}
+            className="w-full sm:w-auto px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5 flex-shrink-0"
+          >
+            <Zap className="w-3.5 h-3.5 fill-white" />
+            🚀 Auto-Enforce
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-slate-400 text-[11px] font-medium">Try instantly:</span>
+          {["Stop guest from reaching HR", "Isolate database from guest", "Block all traffic between guest and HR"].map((ex, i) => (
+            <button
+              key={i}
+              onClick={() => {
+                setAutoPilotPrompt(ex);
+                setIsAutoPilotOpen(true);
+              }}
+              className="text-[11px] px-2.5 py-0.5 rounded bg-slate-850 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-700 font-mono transition-colors"
+            >
+              "{ex}"
+            </button>
+          ))}
+        </div>
+      </div>
+
 
       {repairSuccessNotice && (
         <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-md shadow-emerald-500/10">
@@ -281,6 +353,17 @@ export const VerificationCenter = () => {
           </div>
         </div>
       )}
+
+      {/* Autonomous AutoPilot Modal */}
+      <AutoPilotModal
+        isOpen={isAutoPilotOpen}
+        onClose={() => setIsAutoPilotOpen(false)}
+        defaultPrompt={autoPilotPrompt}
+        onSuccess={() => {
+          refetch();
+        }}
+      />
     </div>
   );
 };
+

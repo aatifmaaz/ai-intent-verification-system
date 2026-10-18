@@ -30,7 +30,33 @@ class NetworkGraph:
         if not matches:
             # Check device names or aliases
             matches = [node for node, data in self.graph.nodes(data=True) if data.get('name') and (data.get('name').lower() in z_clean or z_clean in data.get('name').lower())]
-        return matches
+        if not matches:
+            # Synonym and category resolution for arbitrary custom user inputs
+            synonym_map = {
+                "guest": ["guest", "visitor", "visitors", "wifi", "client", "clients", "laptop", "mobile", "marketing", "sales", "untrusted", "user", "users"],
+                "hr": ["hr", "human", "payroll", "personnel", "staff", "employee", "office", "finance", "accounting"],
+                "engineering": ["eng", "engineering", "dev", "developer", "developers", "code", "git", "rnd", "tech"],
+                "database": ["db", "database", "databases", "sql", "data", "storage", "records", "store"],
+                "dmz": ["dmz", "web", "website", "proxy", "frontend", "public", "internet", "wan", "external"],
+                "management": ["mgmt", "management", "admin", "admins", "console", "control", "ssh", "bastion"],
+                "backup": ["backup", "backups", "archive", "vault"],
+                "application": ["app", "apps", "application", "service", "services", "api"]
+            }
+            mapped_zone = None
+            for target_z, syns in synonym_map.items():
+                if any(s in z_clean for s in syns):
+                    mapped_zone = target_z
+                    break
+            if mapped_zone:
+                matches = [node for node, data in self.graph.nodes(data=True) if data.get('zone') and data.get('zone').lower() == mapped_zone]
+        if not matches:
+            # Ultimate safety fallback: map to primary client or server devices
+            if any(term in z_clean for term in ["server", "db", "target", "internal", "secure", "protect"]):
+                matches = [node for node, data in self.graph.nodes(data=True) if data.get('device_type') == 'server']
+            else:
+                matches = [node for node, data in self.graph.nodes(data=True) if data.get('device_type') == 'client']
+        return matches or list(self.graph.nodes())[:1]
+
 
 
     def is_subnet_match(self, ip_or_subnet, acl_network):

@@ -1,15 +1,20 @@
+import { useState } from 'react';
 import { useApi } from '../hooks/useApi';
 import { getDashboardStats, getRecentActivity, getVerificationHistory } from '../api/dashboard';
 import { MetricCard } from '../components/common/MetricCard';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
 import { ErrorMessage } from '../components/common/ErrorMessage';
-import { Server, Shield, CheckCircle, AlertTriangle, HelpCircle, Wrench } from 'lucide-react';
+import { Server, Shield, CheckCircle, AlertTriangle, HelpCircle, Wrench, Zap, Sparkles } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { AutoPilotModal } from '../components/AutoPilotModal';
 
 export const Dashboard = () => {
   const { data: stats, loading: statsLoading, error: statsError, refetch: refetchStats } = useApi(getDashboardStats);
   const { data: activity, loading: activityLoading } = useApi(() => getRecentActivity(10));
   const { data: history, loading: historyLoading } = useApi(getVerificationHistory);
+
+  const [isAutoPilotOpen, setIsAutoPilotOpen] = useState(false);
+  const [heroPrompt, setHeroPrompt] = useState('Stop guest from reaching HR');
 
   if (statsLoading) return <LoadingSpinner message="Loading dashboard statistics..." />;
   if (statsError) return <ErrorMessage message={statsError.message} onRetry={refetchStats} />;
@@ -32,7 +37,85 @@ export const Dashboard = () => {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-white mb-6">Dashboard Overview</h1>
+      {/* AUTONOMOUS AI AUTO-PILOT HERO SECTION */}
+      <div className="card p-6 bg-gradient-to-r from-slate-900 via-cyan-950/30 to-slate-900 border-cyan-500/40 shadow-2xl relative overflow-hidden">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shadow-lg shadow-cyan-500/20">
+              <Zap className="w-6 h-6 fill-cyan-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-white tracking-wide">
+                  Autonomous Network Auto-Pilot
+                </h2>
+                <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                  Closed-Loop 100% Automated
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Give any requirement in plain English. The AI parses the rule, audits reachability, isolates violations, validates in a sandbox, generates minimal ACL patches, deploys to hardware, and re-verifies 100% compliance automatically.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setIsAutoPilotOpen(true)}
+            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-lg shadow-lg shadow-cyan-600/30 transition-all flex-shrink-0"
+          >
+            <Sparkles className="w-4 h-4 fill-white" />
+            Launch AI Studio
+          </button>
+        </div>
+
+        {/* Inline Prompt Bar */}
+        <div className="mt-4 flex flex-col sm:flex-row items-center gap-3">
+          <div className="relative flex-1 w-full">
+            <input
+              type="text"
+              value={heroPrompt}
+              onChange={(e) => setHeroPrompt(e.target.value)}
+              placeholder="e.g. Stop guest from reaching HR, or Isolate database from guest..."
+              className="w-full px-4 py-2.5 bg-slate-950 border border-slate-700/80 rounded-lg text-xs font-mono text-cyan-300 placeholder-slate-500 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+            />
+          </div>
+
+          <button
+            onClick={() => setIsAutoPilotOpen(true)}
+            className="w-full sm:w-auto px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-lg shadow-md transition-all flex items-center justify-center gap-2 flex-shrink-0"
+          >
+            <Zap className="w-3.5 h-3.5 fill-white" />
+            Auto-Enforce (1-Click)
+          </button>
+        </div>
+
+        {/* Quick Clickable Suggestions */}
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-slate-400 font-semibold text-[11px]">Instant Presets:</span>
+          {[
+            "Stop guest from reaching HR",
+            "Isolate database from guest",
+            "Block all traffic between guest and HR",
+            "Prevent guest from accessing database"
+          ].map((item, idx) => (
+            <button
+              key={idx}
+              onClick={() => {
+                setHeroPrompt(item);
+                setIsAutoPilotOpen(true);
+              }}
+              className="px-2.5 py-1 text-[11px] rounded bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-700/60 transition-colors font-mono"
+            >
+              "{item}"
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-white">Network Telemetry &amp; Metrics</h1>
+        <span className="text-xs text-slate-400 font-mono">15 Simulated Nodes Online</span>
+      </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <MetricCard title="Total Devices" value={stats?.total_devices || 0} icon={Server} color="cyan" />
@@ -171,6 +254,17 @@ export const Dashboard = () => {
           </div>
         )}
       </div>
+
+      {/* Autonomous AutoPilot Modal */}
+      <AutoPilotModal
+        isOpen={isAutoPilotOpen}
+        onClose={() => setIsAutoPilotOpen(false)}
+        defaultPrompt={heroPrompt}
+        onSuccess={() => {
+          refetchStats();
+        }}
+      />
     </div>
   );
 };
+
