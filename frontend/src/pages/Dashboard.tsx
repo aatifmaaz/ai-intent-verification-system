@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useApi } from '../hooks/useApi';
 import { getDashboardStats, getRecentActivity, getVerificationHistory } from '../api/dashboard';
 import { MetricCard } from '../components/common/MetricCard';
@@ -7,6 +7,7 @@ import { ErrorMessage } from '../components/common/ErrorMessage';
 import { Server, Shield, CheckCircle, AlertTriangle, HelpCircle, Wrench, Zap, Sparkles } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { AutoPilotModal } from '../components/AutoPilotModal';
+import { getTopologySuggestions, type TopologySuggestions } from '../api/topology';
 
 export const Dashboard = () => {
   const { data: stats, loading: statsLoading, error: statsError, refetch: refetchStats } = useApi(getDashboardStats);
@@ -15,6 +16,16 @@ export const Dashboard = () => {
 
   const [isAutoPilotOpen, setIsAutoPilotOpen] = useState(false);
   const [heroPrompt, setHeroPrompt] = useState('Stop guest from reaching HR');
+  const [suggestionsData, setSuggestionsData] = useState<TopologySuggestions | null>(null);
+
+  useEffect(() => {
+    getTopologySuggestions().then((data) => {
+      setSuggestionsData(data);
+      if (data?.suggestions && data.suggestions.length > 0) {
+        setHeroPrompt(data.suggestions[0]);
+      }
+    }).catch(() => {});
+  }, []);
 
   if (statsLoading) return <LoadingSpinner message="Loading dashboard statistics..." />;
   if (statsError) return <ErrorMessage message={statsError.message} onRetry={refetchStats} />;
@@ -91,13 +102,15 @@ export const Dashboard = () => {
 
         {/* Quick Clickable Suggestions */}
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-slate-400 font-semibold text-[11px]">Instant Presets:</span>
-          {[
+          <span className="text-slate-400 font-semibold text-[11px]">
+            Suggestions for {suggestionsData?.template_name || 'Network'}:
+          </span>
+          {(suggestionsData?.suggestions?.slice(0, 4) || [
             "Stop guest from reaching HR",
             "Isolate database from guest",
             "Block all traffic between guest and HR",
             "Prevent guest from accessing database"
-          ].map((item, idx) => (
+          ]).map((item, idx) => (
             <button
               key={idx}
               onClick={() => {
@@ -262,6 +275,7 @@ export const Dashboard = () => {
         defaultPrompt={heroPrompt}
         onSuccess={() => {
           refetchStats();
+          getTopologySuggestions().then(setSuggestionsData).catch(() => {});
         }}
       />
     </div>

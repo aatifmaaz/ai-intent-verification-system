@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApi } from '../hooks/useApi';
 import { getIntents, createIntent, deleteIntent, autoEnforceIntent } from '../api/intents';
 import { LoadingSpinner } from '../components/common/LoadingSpinner';
@@ -20,8 +20,9 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { AutoEnforceResult } from '../types';
+import { getTopologySuggestions, type TopologySuggestions } from '../api/topology';
 
-const EXAMPLE_INTENTS = [
+const FALLBACK_INTENTS = [
   "The guest network must not communicate with the HR network.",
   "Isolate guest devices from internal HR servers.",
   "Only administrators may access network devices using SSH.",
@@ -35,6 +36,16 @@ export const IntentManagement: React.FC = () => {
   const [newIntentText, setNewIntentText] = useState(
     'The guest network must not communicate with the HR network.'
   );
+  const [suggestionsData, setSuggestionsData] = useState<TopologySuggestions | null>(null);
+
+  useEffect(() => {
+    getTopologySuggestions().then((data) => {
+      setSuggestionsData(data);
+      if (data?.suggestions && data.suggestions.length > 0) {
+        setNewIntentText(data.suggestions[0]);
+      }
+    }).catch(() => {});
+  }, []);
 
   // Auto-Pilot Execution State
   const [isRunningAutoPilot, setIsRunningAutoPilot] = useState(false);
@@ -61,6 +72,7 @@ export const IntentManagement: React.FC = () => {
         setAutoPilotResult(result);
         setIsRunningAutoPilot(false);
         refetch();
+        getTopologySuggestions().then(setSuggestionsData).catch(() => {});
       }, 2000);
     } catch (err: unknown) {
       clearTimeout(timer1);
@@ -178,11 +190,20 @@ export const IntentManagement: React.FC = () => {
               />
             </div>
 
-            {/* Example Presets */}
+            {/* Dynamic Template Presets */}
             <div className="space-y-2">
-              <div className="text-xs text-slate-400 font-medium">Click a real-world requirement to test instantly:</div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400 font-medium">
+                  Recommended Enforcements for {suggestionsData?.template_name || 'Current Network'}:
+                </span>
+                {suggestionsData && (
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                    {suggestionsData.devices_count} Devices Active
+                  </span>
+                )}
+              </div>
               <div className="flex flex-wrap gap-2">
-                {EXAMPLE_INTENTS.map((ex, i) => (
+                {(suggestionsData?.suggestions || FALLBACK_INTENTS).map((ex, i) => (
                   <button
                     key={i}
                     onClick={() => setNewIntentText(ex)}

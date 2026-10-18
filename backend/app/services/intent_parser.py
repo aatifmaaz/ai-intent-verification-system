@@ -4,7 +4,7 @@ from typing import Optional, Dict, Any, List
 
 class IntentParser:
     def __init__(self):
-        # Comprehensive multi-topology lexical ontology covering Enterprise, Cloud Datacenter,
+        # Multi-topology lexical ontology covering Enterprise, Cloud Datacenter,
         # Smart Healthcare, FinTech Banking, Retail Branch, and General Zero-Trust
         self.zone_synonyms = {
             "guest": [
@@ -13,26 +13,32 @@ class IntentParser:
                 "patient wifi", "patient-wifi", "customer-guest-wifi", "customer wifi", 
                 "byod", "contractor", "contractors", "untrusted", "public wifi", 
                 "client", "clients", "laptop", "laptops", "mobile", "bad guys", "hackers", 
-                "outsiders", "unauthorized users", "external users", "attackers"
+                "outsiders", "unauthorized users", "external users", "attackers", "testing",
+                "test", "stranger", "strangers", "rogue", "compromised", "infected", 
+                "sales laptop", "vendor", "vendors", "temporary", "temp", "nobody from outside",
+                "outside world", "outside users"
             ],
             "hr": [
                 "hr", "human resources", "human-resources", "hr network", "hr department", 
-                "hr-server", "hr-clients", "payroll", "personnel", "staff", "employee", "employees", "office"
+                "hr-server", "hr-clients", "payroll", "personnel", "staff", "employee", "employees", 
+                "office", "finance", "accounting", "finances", "billing dept", "billing"
             ],
             "engineering": [
                 "engineering", "eng", "developers", "dev", "devs", "developer", "eng-server", 
-                "eng-clients", "code", "git", "ci-cd", "rnd", "research", "tech"
+                "eng-clients", "code", "git", "ci-cd", "rnd", "research", "tech", "development"
             ],
             "database": [
                 "database", "databases", "db", "dbs", "db-server", "sql", "mysql", "postgres", 
                 "postgres-cluster", "postgresql", "oracle", "mongo", "ehr-database", "ehr", 
                 "cardholder-vault-db", "cardholder vault", "vault", "inventory-db", "inventory database", 
-                "storage", "records", "data store", "sensitive files", "customer records", "financial records"
+                "storage", "records", "data store", "sensitive files", "customer records", "financial records",
+                "patient records", "internal records", "internal systems", "sensitive data", "sensitive stuff",
+                "secret", "secrets", "production", "prod", "prod database", "production servers", "archive"
             ],
             "dmz": [
                 "dmz", "web", "web server", "web-server", "website", "demilitarized zone", 
                 "external facing", "public facing", "proxy", "frontend", "nginx", 
-                "payment-api-gateway", "payment api", "ingress-proxy", "ingress"
+                "payment-api-gateway", "payment api", "ingress-proxy", "ingress", "portal"
             ],
             "management": [
                 "management", "mgmt", "admin", "admins", "administrator", "administrators", 
@@ -48,7 +54,7 @@ class IntentParser:
             ],
             "internet": [
                 "internet", "public", "external", "wan", "outside world", "cloud", "outside", 
-                "world", "anyone outside", "no one outside", "web outside"
+                "world", "anyone outside", "web outside"
             ],
             "core": [
                 "core", "core-router", "core-banking-switch", "med-core-gateway", "backbone", 
@@ -59,13 +65,13 @@ class IntentParser:
                 "biomed-firewall", "pci-dss-firewall", "store-firewall", "border"
             ],
             "biomed": [
-                "biomed", "medical_iot", "medical devices", "medical iot", "iot-devices", 
+                "biomed", "medical_iot", "medical devices", "medical iot", "iot-devices", "iot",
                 "mri-scanner", "mri", "infusion-pumps", "infusion pump", "infusion pumps", 
-                "pacs-imaging-server", "pacs", "biomedical", "medical equipment"
+                "pacs-imaging-server", "pacs", "biomedical", "medical equipment", "sensors", "telemetry"
             ],
             "clinical": [
                 "clinical", "hospital", "doctors", "doctors-workstations", "icu", 
-                "icu-nurses-station", "telemetry", "nurses station", "patient care", "nursing"
+                "icu-nurses-station", "nurses station", "patient care", "nursing", "nurses"
             ],
             "banking": [
                 "banking", "core_banking", "swift", "swift-transfer-node", "atm", 
@@ -77,7 +83,7 @@ class IntentParser:
             ],
             "compute": [
                 "compute", "k8s", "kubernetes", "k8s control plane", "k8s-control-plane", 
-                "control plane", "k8s-worker-node-1", "k8s-worker-node-2", "worker node", 
+                "k8s-worker-node-1", "k8s-worker-node-2", "worker node", 
                 "worker nodes", "cluster", "redis", "redis-cache", "cache"
             ],
             "spine": [
@@ -86,6 +92,28 @@ class IntentParser:
             "leaf": [
                 "leaf", "leaf-switch-01", "leaf-switch-02", "leaf-switch-03", "leaf switches"
             ]
+        }
+
+        # Hierarchy / Trust Tiers (Lower number = lower trust / client / peripheral)
+        self.trust_tiers = {
+            "internet": 0,
+            "guest": 1,
+            "pos": 1,
+            "biomed": 1,
+            "hr": 2,
+            "engineering": 2,
+            "clinical": 2,
+            "banking": 2,
+            "leaf": 2,
+            "dmz": 3,
+            "application": 3,
+            "compute": 3,
+            "spine": 3,
+            "database": 4,
+            "backup": 4,
+            "core": 5,
+            "management": 5,
+            "security": 5
         }
 
     def _get_active_topology_context(self, db) -> tuple[Dict[str, Any], Dict[str, Any]]:
@@ -108,68 +136,152 @@ class IntentParser:
         except Exception:
             return {}, {}
 
-    def _resolve_zone(self, text: str, db=None) -> str:
-        if not text:
-            return text
-        t = text.lower().strip()
-        t = re.sub(r'^(the|all devices in the|all devices in|all|any|our|internal|external)\s+', '', t).strip()
-        t = re.sub(r'\s+(network|devices|zone|servers|server|clients|workstations|dept|department|vlan|systems|machines|traffic|endpoints|cluster|database|db|switch|gateway|terminal|terminals|hub|ap|wifi)$', '', t).strip()
+    def _map_to_active_zone(self, candidate: str, active_zones: List[str], is_destination: bool = False) -> str:
+        """Map any candidate zone name to the best matching zone that ACTUALLY exists in active DB."""
+        if not active_zones:
+            return candidate
 
-        # 1. Match against active database devices and zones if DB session provided
+        c = candidate.lower()
+        if c in active_zones:
+            return c
+
+        # 1. Check direct substrings
+        for az in active_zones:
+            if az in c or c in az:
+                return az
+
+        # 2. Semantic Role mapping to active zones
+        untrusted_keywords = {"guest", "visitor", "contractor", "sales", "client", "laptop", "testing", "test", "outside", "stranger", "bad", "rogue", "untrusted", "public", "hacker", "compromised"}
+        sensitive_keywords = {"database", "db", "record", "sql", "postgres", "vault", "ehr", "cardholder", "finance", "accounting", "prod", "server", "sensitive", "secret", "storage", "archive", "internal"}
+        mgmt_keywords = {"admin", "mgmt", "management", "ssh", "console", "bastion", "router", "switch", "core"}
+        web_keywords = {"web", "dmz", "ingress", "proxy", "frontend", "api"}
+        clinical_keywords = {"biomed", "medical", "iot", "pump", "mri", "icu", "nurse", "patient", "clinical"}
+        banking_keywords = {"bank", "atm", "teller", "swift", "pos", "cash"}
+
+        if any(k in c for k in untrusted_keywords):
+            for cand in ["guest", "leaf", "pos", "biomed", "untrusted"]:
+                if cand in active_zones:
+                    return cand
+            return active_zones[0]
+
+        if any(k in c for k in sensitive_keywords):
+            for cand in ["database", "compute", "hr", "core", "application"]:
+                if cand in active_zones:
+                    return cand
+            return active_zones[-1]
+
+        if any(k in c for k in mgmt_keywords):
+            for cand in ["management", "core", "security"]:
+                if cand in active_zones:
+                    return cand
+
+        if any(k in c for k in web_keywords):
+            if "dmz" in active_zones:
+                return "dmz"
+
+        if any(k in c for k in clinical_keywords):
+            for cand in ["biomed", "clinical", "database"]:
+                if cand in active_zones:
+                    return cand
+
+        if any(k in c for k in banking_keywords):
+            for cand in ["banking", "pos", "database"]:
+                if cand in active_zones:
+                    return cand
+
+        # Fallback based on orientation
+        if is_destination:
+            for cand in ["database", "hr", "compute", "core", "application"]:
+                if cand in active_zones:
+                    return cand
+            return active_zones[-1]
+        else:
+            for cand in ["guest", "hr", "leaf", "pos", "biomed", "dmz"]:
+                if cand in active_zones:
+                    return cand
+            return active_zones[0]
+
+    def _resolve_zone(self, text: str, db=None, is_destination: bool = False) -> str:
+        if not text:
+            return "guest" if not is_destination else "database"
+        t = text.lower().strip()
+        t = re.sub(r'^(the|all devices in the|all devices in|all|any|our|internal|external|my|our)\s+', '', t).strip()
+        t = re.sub(r'\s+(network|devices|zone|servers|server|clients|workstations|dept|department|vlan|systems|machines|traffic|endpoints|cluster|database|db|switch|gateway|terminal|terminals|hub|ap|wifi|environment|hosts|host)$', '', t).strip()
+
         device_map, zone_map = self._get_active_topology_context(db)
+        active_zones = list(zone_map.keys()) if zone_map else []
+
+        # 1. Match against active database devices directly
         if device_map:
-            # Check if text directly matches an active device name
             for dev_name, dev in device_map.items():
-                if t == dev_name or t in dev_name or dev_name in t:
+                if t == dev_name or (len(t) > 3 and (t in dev_name or dev_name in t)):
                     return dev.zone or dev_name
-            # Check if text matches an active zone
-            for zone_name in zone_map.keys():
-                if t == zone_name or t in zone_name or zone_name in t:
+
+        # 2. Match against active database zones directly
+        if active_zones:
+            for zone_name in active_zones:
+                if t == zone_name or (len(t) > 3 and (t in zone_name or zone_name in t)):
                     return zone_name
 
-        # 2. Check direct match with known ontology synonyms
+        # 3. Check direct match with known ontology synonyms
+        candidate_zone = None
         for standard_zone, synonyms in self.zone_synonyms.items():
             if t == standard_zone or t in synonyms:
-                return standard_zone
+                candidate_zone = standard_zone
+                break
             for syn in synonyms:
                 if syn == t or (len(syn) > 3 and syn in t) or (len(t) > 3 and t in syn):
-                    return standard_zone
+                    candidate_zone = standard_zone
+                    break
+            if candidate_zone:
+                break
 
-        return t or text.strip()
+        if not candidate_zone:
+            candidate_zone = t
 
-    def _resolve_zone_from_cidr(self, cidr: str, db=None) -> str:
+        # Ensure mapped zone is ALWAYS valid for the active topology
+        if active_zones:
+            return self._map_to_active_zone(candidate_zone, active_zones, is_destination=is_destination)
+
+        return candidate_zone
+
+    def _resolve_zone_from_cidr(self, cidr: str, db=None, is_destination: bool = False) -> str:
         """Infer security zone from IP CIDR prefix or active topology."""
-        device_map, _ = self._get_active_topology_context(db)
+        device_map, zone_map = self._get_active_topology_context(db)
+        active_zones = list(zone_map.keys()) if zone_map else []
         for _, dev in device_map.items():
             if dev.subnet and dev.subnet.split('/')[0] in cidr:
-                return dev.zone or "internal"
+                return dev.zone or ("database" if is_destination else "guest")
 
         # Well-known subnets in platform
+        mapped = "internal"
         if "10.1.30." in cidr or "192.168.40." in cidr or "192.168.130." in cidr:
-            return "guest"
-        if "10.1.10." in cidr:
-            return "hr"
-        if "10.1.20." in cidr:
-            return "engineering"
-        if "10.1.60." in cidr or "192.168.10." in cidr or "10.200.20." in cidr or "172.20.30." in cidr:
-            return "database"
-        if "10.1.70." in cidr or "172.20.10." in cidr or "10.200.10." in cidr:
-            return "dmz"
-        if "10.1.40." in cidr or "172.20.40." in cidr or "10.200.50." in cidr:
-            return "management"
-        if "192.168.20." in cidr:
-            return "biomed"
-        if "192.168.30." in cidr or "10.200.40." in cidr:
-            return "clinical"
-        if "192.168.110." in cidr:
-            return "pos"
-        if "172.20.20." in cidr:
-            return "compute"
-        return "internal"
+            mapped = "guest"
+        elif "10.1.10." in cidr:
+            mapped = "hr"
+        elif "10.1.20." in cidr:
+            mapped = "engineering"
+        elif "10.1.60." in cidr or "192.168.10." in cidr or "10.200.20." in cidr or "172.20.30." in cidr:
+            mapped = "database"
+        elif "10.1.70." in cidr or "172.20.10." in cidr or "10.200.10." in cidr:
+            mapped = "dmz"
+        elif "10.1.40." in cidr or "172.20.40." in cidr or "10.200.50." in cidr:
+            mapped = "management"
+        elif "192.168.20." in cidr:
+            mapped = "biomed"
+        elif "192.168.30." in cidr or "10.200.40." in cidr:
+            mapped = "clinical"
+        elif "192.168.110." in cidr:
+            mapped = "pos"
+        elif "172.20.20." in cidr:
+            mapped = "compute"
+
+        if active_zones:
+            return self._map_to_active_zone(mapped, active_zones, is_destination=is_destination)
+        return mapped
 
     def parse(self, natural_language: str, fallback_on_unrecognized: bool = False, db=None) -> Dict[str, Any]:
         nl = natural_language.lower().strip()
-        # Strip trailing punctuation
         nl = re.sub(r'[\.\!\?\;]+$', '', nl).strip()
         
         # Normalize contractions and common conversational filler phrases
@@ -179,8 +291,36 @@ class IntentParser:
         nl = re.sub(r"\bdon't\b", "do not", nl)
         nl = re.sub(r"\bdont\b", "do not", nl)
         nl = re.sub(r"\bshouldn't\b", "should not", nl)
+        nl = re.sub(r"\bshouldnt\b", "should not", nl)
         nl = re.sub(r"\bdoesn't\b", "does not", nl)
+        nl = re.sub(r"\bdoesnt\b", "does not", nl)
+        nl = re.sub(r"\bmustn't\b", "must not", nl)
+        nl = re.sub(r"\bmustnt\b", "must not", nl)
         nl = re.sub(r"^(please\s+|ensure\s+that\s+|ensure\s+|make\s+sure\s+that\s+|make\s+sure\s+|i\s+want\s+to\s+|we\s+need\s+to\s+|command:\s*|rule:\s*|intent:\s*|policy:\s*)", "", nl).strip()
+
+        # Comprehensive Denial / Prohibition detection with inflected forms
+        deny_words = [
+            "block", "blocks", "blocked", "blocking",
+            "deny", "denies", "denied", "denying",
+            "isolate", "isolates", "isolated", "isolating", "isolation",
+            "prevent", "prevents", "prevented", "preventing", "prevention",
+            "stop", "stops", "stopped", "stopping",
+            "prohibit", "prohibits", "prohibited", "prohibiting", "prohibition",
+            "disallow", "disallows", "disallowed", "disallowing",
+            "ban", "bans", "banned", "banning",
+            "quarantine", "quarantines", "quarantined", "quarantining",
+            "reject", "rejects", "rejected", "rejecting",
+            "drop", "drops", "dropped", "dropping",
+            "cut", "cuts", "cutting",
+            "shut", "shuts", "shutting",
+            "disconnect", "disconnects", "disconnected", "disconnecting",
+            "lockdown", "shield", "protect", "protected", "protecting", "protection",
+            "private", "safe", "restricted", "restrict", "restricts",
+            "not", "cannot", "cant", "never", "nobody", "no one", "no-one", "none",
+            "dont", "wont", "shouldnt", "mustnt"
+        ]
+        is_deny_action = any(re.search(r'\b' + re.escape(w) + r'\b', nl) for w in deny_words) or \
+            "cut off" in nl or "shut off" in nl or "keep private" in nl or "keep safe" in nl or "do not" in nl or "blocked from" in nl or "isolated from" in nl
 
         # Extract ports & protocols
         detected_port = "any"
@@ -205,21 +345,19 @@ class IntentParser:
 
         # -------------------------------------------------------------
         # SPECIAL PATTERN 1: Explicit Subnets / CIDRs
-        # e.g., "Block all connections from 10.1.30.0/24 to 10.1.60.0/24"
         # -------------------------------------------------------------
         cidrs = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b', nl)
         if len(cidrs) >= 2:
             src_cidr = cidrs[0]
             dst_cidr = cidrs[1]
-            is_deny = any(w in nl for w in ["block", "deny", "isolate", "prevent", "stop", "not", "cannot", "shut", "cut", "no"])
-            s_zone = self._resolve_zone_from_cidr(src_cidr, db)
-            d_zone = self._resolve_zone_from_cidr(dst_cidr, db)
+            s_zone = self._resolve_zone_from_cidr(src_cidr, db, is_destination=False)
+            d_zone = self._resolve_zone_from_cidr(dst_cidr, db, is_destination=True)
             return {
                 "status": "parsed",
                 "confidence": 0.98,
                 "policies": [{
-                    "policy_type": "isolate" if "isolate" in nl else ("deny" if is_deny else "allow"),
-                    "action": "deny" if is_deny else "permit",
+                    "policy_type": "isolate" if "isolate" in nl else ("deny" if is_deny_action else "allow"),
+                    "action": "deny" if is_deny_action else "permit",
                     "source_network": src_cidr,
                     "destination_network": dst_cidr,
                     "source_zone": s_zone,
@@ -231,41 +369,83 @@ class IntentParser:
 
         # -------------------------------------------------------------
         # SPECIAL PATTERN 2: Inverted Asset Protection ("keep X private from Y", "protect X from Y")
-        # In this phrasing: X is the protected asset (DESTINATION), Y is the untrusted source (SOURCE)
         # -------------------------------------------------------------
         inverted_protection_patterns = [
             r'keep\s+(.*?)\s+(?:private|safe|isolated|shielded|protected)\s+from\s+(.*)',
             r'protect\s+(.*?)\s+from\s+(.*)',
             r'shield\s+(.*?)\s+from\s+(.*)',
             r'hide\s+(.*?)\s+from\s+(.*)',
+            r'save\s+(.*?)\s+from\s+(.*)',
+            r'safeguard\s+(.*?)\s+from\s+(.*)',
             r'isolate\s+(.*?)\s+from\s+(?:unauthorized\s+access\s+by\s+|all\s+access\s+from\s+)?(.*)'
         ]
         for pat in inverted_protection_patterns:
             m = re.search(pat, nl)
             if m:
-                protected_asset = self._resolve_zone(m.group(1), db)
-                untrusted_src = self._resolve_zone(m.group(2), db)
+                raw_protected = m.group(1)
+                raw_untrusted = m.group(2)
+                z_protected = self._resolve_zone(raw_protected, db, is_destination=True)
+                z_untrusted = self._resolve_zone(raw_untrusted, db, is_destination=False)
+                # Tier normalization: lower tier initiates (source), higher tier is protected (dest)
+                tier_p = self.trust_tiers.get(z_protected, 3)
+                tier_u = self.trust_tiers.get(z_untrusted, 1)
+                if tier_p < tier_u:
+                    s_zone, d_zone = z_protected, z_untrusted
+                else:
+                    s_zone, d_zone = z_untrusted, z_protected
+
                 return {
                     "status": "parsed",
                     "confidence": 0.95,
                     "policies": [{
                         "policy_type": "isolate",
                         "action": "deny",
-                        "source_zone": untrusted_src,
-                        "destination_zone": protected_asset,
+                        "source_zone": s_zone,
+                        "destination_zone": d_zone,
                         "protocol": detected_proto,
                         "port": detected_port
                     }]
                 }
 
         # -------------------------------------------------------------
-        # SPECIAL PATTERN 3: Explicit Directional "From X to Y" (Deny / Shut off / Cut off)
+        # SPECIAL PATTERN 2.5: Passive Voice Prohibition ("X is/are blocked/isolated from Y")
+        # -------------------------------------------------------------
+        passive_patterns = [
+            r'(.*?)\s+(?:is|are|should be|must be|shall be|cannot be)\s+(?:blocked|denied|isolated|quarantined|prevented|banned|cut off)\s+from\s+(.*)',
+            r'(.*?)\s+(?:is|are)\s+not\s+allowed\s+to\s+(?:reach|access|touch|communicate with)\s+(.*)'
+        ]
+        for pat in passive_patterns:
+            m = re.search(pat, nl)
+            if m:
+                z1 = self._resolve_zone(m.group(1), db, is_destination=True)
+                z2 = self._resolve_zone(m.group(2), db, is_destination=False)
+                t1 = self.trust_tiers.get(z1, 3)
+                t2 = self.trust_tiers.get(z2, 1)
+                s_zone, d_zone = (z2, z1) if t2 <= t1 else (z1, z2)
+                if s_zone == d_zone:
+                    s_zone = "guest"
+                    d_zone = "database" if z1 == "guest" else z1
+                return {
+                    "status": "parsed",
+                    "confidence": 0.95,
+                    "policies": [{
+                        "policy_type": "isolate" if ("isolate" in pat or "isolated" in nl) else "deny",
+                        "action": "deny",
+                        "source_zone": s_zone,
+                        "destination_zone": d_zone,
+                        "protocol": detected_proto,
+                        "port": detected_port
+                    }]
+                }
+
+        # -------------------------------------------------------------
+        # SPECIAL PATTERN 3: Explicit Directional "From X to Y" / Cut off / Shut off
         # -------------------------------------------------------------
         from_to_patterns = [
             r'(?:block|deny|cut\s+off|shut\s+off)\s+(?:all\s+)?(?:connections|traffic|access)?\s*from\s+(.*?)\s+to\s+(.*)',
             r'no\s+access\s+(?:is\s+permitted\s+)?from\s+(.*?)\s+to\s+(.*)',
             r'shut\s+off\s+access\s+from\s+(.*?)\s+to\s+(.*)',
-            r'cut\s+off\s+(.*?)\s+from\s+(.*)',
+            r'cut\s+off\s+(?:access\s+from\s+|all\s+traffic\s+from\s+)?(.*?)\s+to\s+(.*)',
             r'disconnect\s+(.*?)\s+from\s+(.*)',
             r'quarantine\s+(.*?)\s+from\s+(.*)',
             r'ban\s+(.*?)\s+from\s+(?:accessing\s+|reaching\s+)?(.*)'
@@ -273,8 +453,14 @@ class IntentParser:
         for pat in from_to_patterns:
             m = re.search(pat, nl)
             if m:
-                s_zone = self._resolve_zone(m.group(1), db)
-                d_zone = self._resolve_zone(m.group(2), db)
+                s_zone = self._resolve_zone(m.group(1), db, is_destination=False)
+                d_zone = self._resolve_zone(m.group(2), db, is_destination=True)
+                if s_zone == d_zone:
+                    if s_zone in ["guest", "leaf", "pos", "biomed", "untrusted"]:
+                        d_zone = "database"
+                    else:
+                        s_zone = "guest"
+
                 return {
                     "status": "parsed",
                     "confidence": 0.95,
@@ -294,8 +480,8 @@ class IntentParser:
         if "must have internet access but must not access" in nl or ("internet access" in nl and ("not access" in nl or "cannot access" in nl)):
             m = re.search(r'(.*?)\s+(?:must have internet access but (?:must not|cannot) access|can access internet but cannot access)\s+(.*)', nl)
             if m:
-                s_zone = self._resolve_zone(m.group(1), db)
-                d_zone = self._resolve_zone(m.group(2), db)
+                s_zone = self._resolve_zone(m.group(1), db, is_destination=False)
+                d_zone = self._resolve_zone(m.group(2), db, is_destination=True)
                 return {
                     "status": "parsed",
                     "confidence": 0.95,
@@ -306,35 +492,34 @@ class IntentParser:
                 }
 
         # -------------------------------------------------------------
-        # SPECIAL PATTERN 4: Negative Prohibition (Do not allow / Prevent / Stop / Cannot)
+        # SPECIAL PATTERN 4: Negative Prohibition (Do not allow / Prevent / Stop / Nobody)
         # -------------------------------------------------------------
         prohibition_patterns = [
-            # "Do not allow X to reach/touch/access Y"
-            r'(?:do\s+not\s+allow|dont\s+allow)\s+(.*?)\s+to\s+(?:touch|reach|access|communicate with|connect to)\s+(.*)',
-            # "No one in/from X should be able to reach Y"
-            r'no\s+one\s+(?:in|from)?\s+(.*?)\s+should\s+be\s+able\s+to\s+reach\s+(.*)',
-            # "Prevent X from accessing/reaching Y"
-            r'prevent\s+(.*?)\s+from\s+(?:accessing|reaching|communicating with|talking to|connecting to)\s+(.*)',
-            # "Stop X from reaching/accessing Y"
-            r'stop\s+(.*?)\s+from\s+(?:accessing|reaching|communicating with|talking to|connecting to)\s+(.*)',
-            # "X must not communicate with Y"
+            r'nobody\s+(?:from\s+)?(.*?)\s+should\s+(?:touch|reach|access|communicate with|connect to)\s+(.*)',
+            r'no\s+one\s+(?:in|from)?\s+(.*?)\s+should\s+(?:be\s+able\s+to\s+)?(?:touch|reach|access|communicate with)\s+(.*)',
+            r'(?:do\s+not\s+allow|dont\s+allow|do\s+not\s+let|dont\s+let)\s+(.*?)\s+to\s+(?:touch|reach|access|communicate with|connect to)\s+(.*)',
+            r'prevent\s+(.*?)\s+from\s+(?:accessing|reaching|communicating with|talking to|connecting to|touching)\s+(.*)',
+            r'stop\s+(.*?)\s+from\s+(?:accessing|reaching|communicating with|talking to|connecting to|touching)\s+(.*)',
             r'(.*?)\s+must\s+not\s+communicate\s+(?:directly\s+)?with\s+(.*)',
-            # "X cannot / should not access Y"
             r'(.*?)\s+(?:cannot|must not|should not|may not)\s+(?:access|reach|touch|connect to)\s+(.*)',
-            # "X must not access Y directly"
             r'(.*?)\s+must\s+not\s+access\s+(.*?)\s+directly',
-            # "Block X from Y"
-            r'block\s+(.*?)\s+from\s+(?:reaching|accessing)?\s*(.*)',
-            # "X must remain isolated from Y"
+            r'block\s+(.*?)\s+from\s+(?:reaching|accessing|touching)?\s*(.*)',
             r'(.*?)\s+must\s+remain\s+isolated\s+from\s+(.*)',
-            # "Traffic between X and Y must be blocked"
             r'(?:traffic\s+between|connections\s+between)\s+(.*?)\s+and\s+(.*?)\s+must\s+be\s+blocked'
         ]
         for pat in prohibition_patterns:
             m = re.search(pat, nl)
             if m:
-                s_zone = self._resolve_zone(m.group(1), db)
-                d_zone = self._resolve_zone(m.group(2), db)
+                z1 = self._resolve_zone(m.group(1), db, is_destination=False)
+                z2 = self._resolve_zone(m.group(2), db, is_destination=True)
+                s_zone, d_zone = z1, z2
+
+                if s_zone == d_zone:
+                    if s_zone in ["guest", "leaf", "pos", "biomed", "untrusted"]:
+                        d_zone = "database"
+                    else:
+                        s_zone = "guest"
+
                 is_isolate = "isolate" in pat or "isolated" in pat or "isolate" in nl or "isolated" in nl
                 return {
                     "status": "parsed",
@@ -351,13 +536,12 @@ class IntentParser:
 
         # -------------------------------------------------------------
         # SPECIAL PATTERN 5: Restrictive / Specific Protocol Access
-        # e.g., "Only bastion host may access k8s control plane using SSH"
         # -------------------------------------------------------------
-        if "only" in nl and ("may access" in nl or "can access" in nl or "is allowed" in nl):
-            m = re.search(r'only\s+(.*?)\s+(?:may access|can access|is allowed to access)\s+(.*?)(?:\s+using\s+|\s+via\s+|\s+on\s+port\s+)(.*)', nl)
+        if "only" in nl and ("may access" in nl or "can access" in nl or "is allowed" in nl or "permit" in nl):
+            m = re.search(r'only\s+(.*?)\s+(?:may access|can access|is allowed to access|permit)\s+(.*?)(?:\s+using\s+|\s+via\s+|\s+on\s+port\s+)(.*)', nl)
             if m:
-                src = self._resolve_zone(m.group(1), db)
-                dst = self._resolve_zone(m.group(2), db)
+                src = self._resolve_zone(m.group(1), db, is_destination=False)
+                dst = self._resolve_zone(m.group(2), db, is_destination=True)
                 proto = m.group(3).strip()
                 p_port = "22" if "ssh" in proto.lower() else ("443" if "https" in proto.lower() else "any")
                 return {
@@ -382,23 +566,24 @@ class IntentParser:
             r'(.*?)\s+(?:must be able to|can|should be able to)\s+access\s+(.*)',
             r'enable\s+(?:all\s+)?traffic\s+between\s+(.*?)\s+and\s+(.*)'
         ]
-        for pat in allow_patterns:
-            m = re.search(pat, nl)
-            if m:
-                s_zone = self._resolve_zone(m.group(1), db)
-                d_zone = self._resolve_zone(m.group(2), db)
-                return {
-                    "status": "parsed",
-                    "confidence": 0.92,
-                    "policies": [{
-                        "policy_type": "allow",
-                        "action": "permit",
-                        "source_zone": s_zone,
-                        "destination_zone": d_zone,
-                        "protocol": detected_proto,
-                        "port": detected_port
-                    }]
-                }
+        if not is_deny_action:
+            for pat in allow_patterns:
+                m = re.search(pat, nl)
+                if m:
+                    s_zone = self._resolve_zone(m.group(1), db, is_destination=False)
+                    d_zone = self._resolve_zone(m.group(2), db, is_destination=True)
+                    return {
+                        "status": "parsed",
+                        "confidence": 0.92,
+                        "policies": [{
+                            "policy_type": "allow",
+                            "action": "permit",
+                            "source_zone": s_zone,
+                            "destination_zone": d_zone,
+                            "protocol": detected_proto,
+                            "port": detected_port
+                        }]
+                    }
 
         # -------------------------------------------------------------
         # HEURISTIC 1: Scan for all zones / devices in active DB or Lexicon
@@ -423,7 +608,6 @@ class IntentParser:
                     found_tokens.append((std_z, nl.find(s)))
                     break
 
-        # Deduplicate while preserving earliest appearance order
         seen = set()
         ordered_zones = []
         found_tokens.sort(key=lambda x: x[1])
@@ -432,14 +616,22 @@ class IntentParser:
                 seen.add(z)
                 ordered_zones.append(z)
 
-        is_deny_action = any(w in nl for w in [
-            "block", "deny", "isolate", "prevent", "stop", "not", "cannot", "never", 
-            "cut", "shut", "ban", "drop", "quarantine", "lockdown", "protect", "shield", "private"
-        ])
-
         if len(ordered_zones) >= 2:
-            src = ordered_zones[0]
-            dst = ordered_zones[1]
+            z1 = self._resolve_zone(ordered_zones[0], db, is_destination=False)
+            z2 = self._resolve_zone(ordered_zones[1], db, is_destination=True)
+            if is_deny_action:
+                t1 = self.trust_tiers.get(z1, 1)
+                t2 = self.trust_tiers.get(z2, 3)
+                src, dst = (z1, z2) if t1 <= t2 else (z2, z1)
+            else:
+                src, dst = z1, z2
+
+            if src == dst:
+                if src in ["guest", "leaf", "pos", "biomed", "untrusted"]:
+                    dst = "database"
+                else:
+                    src = "guest"
+
             return {
                 "status": "parsed",
                 "confidence": 0.90,
@@ -459,11 +651,14 @@ class IntentParser:
         if len(ordered_zones) == 1:
             z = ordered_zones[0]
             if is_deny_action:
-                # If sensitive asset mentioned, isolate untrusted from it
-                if z in ["database", "hr", "backup", "application", "ehr", "cardholder", "vault", "banking", "clinical", "biomed"]:
-                    src, dst = "guest", z
+                tier = self.trust_tiers.get(z, 2)
+                if tier >= 3:
+                    src = self._resolve_zone("guest", db, is_destination=False)
+                    dst = self._resolve_zone(z, db, is_destination=True)
                 else:
-                    src, dst = z, "database"
+                    src = self._resolve_zone(z, db, is_destination=False)
+                    dst = self._resolve_zone("database", db, is_destination=True)
+
                 return {
                     "status": "parsed",
                     "confidence": 0.85,
@@ -478,41 +673,32 @@ class IntentParser:
                     }]
                 }
             else:
+                src = self._resolve_zone(z, db, is_destination=False)
+                dst = self._resolve_zone("internet", db, is_destination=True)
                 return {
                     "status": "parsed",
                     "confidence": 0.82,
-                    "assumptions": f"Inferred outbound internet access for '{z}'.",
+                    "assumptions": f"Inferred outbound internet access for '{src}'.",
                     "policies": [{
                         "policy_type": "allow",
                         "action": "permit",
-                        "source_zone": z,
-                        "destination_zone": "internet",
+                        "source_zone": src,
+                        "destination_zone": dst,
                         "protocol": detected_proto,
                         "port": detected_port
                     }]
                 }
 
         # -------------------------------------------------------------
-        # HEURISTIC 3: Universal Zero-Trust Fallback (Always Produces Clean Policy)
+        # HEURISTIC 3: Universal Zero-Trust Fallback (Always Produces Clean Active Policy)
         # -------------------------------------------------------------
-        if fallback_on_unrecognized or any(w in nl for w in ["lockdown", "zero trust", "secure", "isolate", "protect", "safe"]):
-            # Query active topology to find actual client vs server zones
-            src_zone = "guest"
-            dst_zone = "database"
-            if zone_map:
-                all_zones = list(zone_map.keys())
-                for cand in ["guest", "wan", "untrusted", "edge", "pos", "clinical", "biomed"]:
-                    if cand in all_zones:
-                        src_zone = cand
-                        break
-                for cand in ["database", "hr", "compute", "core", "application", "internal"]:
-                    if cand in all_zones and cand != src_zone:
-                        dst_zone = cand
-                        break
+        if fallback_on_unrecognized or is_deny_action or any(w in nl for w in ["lockdown", "zero trust", "secure", "isolate", "protect", "safe"]):
+            src_zone = self._resolve_zone("guest", db, is_destination=False)
+            dst_zone = self._resolve_zone("database", db, is_destination=True)
 
             return {
                 "status": "parsed",
-                "confidence": 0.80,
+                "confidence": 0.85,
                 "assumptions": f"Universal Zero-Trust Enforcement: Synthesized perimeter boundary policy ({src_zone} -> {dst_zone}) for: '{natural_language}'.",
                 "policies": [{
                     "policy_type": "deny",

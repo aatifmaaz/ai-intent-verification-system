@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useApi } from '../hooks/useApi';
 import { getVerificationResults, runVerification, proposeRepair } from '../api/verification';
@@ -7,6 +7,7 @@ import { ErrorMessage } from '../components/common/ErrorMessage';
 import { Play, ShieldCheck, ShieldAlert, CheckCircle, HelpCircle, ChevronDown, ChevronRight, Wrench, Filter, ArrowRight, Zap, Sparkles } from 'lucide-react';
 import { VerificationRun, VerificationFinding } from '../types';
 import { AutoPilotModal } from '../components/AutoPilotModal';
+import { getTopologySuggestions, type TopologySuggestions } from '../api/topology';
 
 export const VerificationCenter = () => {
   const { data: runs, loading, error, refetch } = useApi(getVerificationResults);
@@ -18,6 +19,16 @@ export const VerificationCenter = () => {
   const [repairSuccessNotice, setRepairSuccessNotice] = useState<{ id: number; message: string } | null>(null);
   const [isAutoPilotOpen, setIsAutoPilotOpen] = useState(false);
   const [autoPilotPrompt, setAutoPilotPrompt] = useState('Stop guest from reaching HR');
+  const [suggestionsData, setSuggestionsData] = useState<TopologySuggestions | null>(null);
+
+  useEffect(() => {
+    getTopologySuggestions().then((data) => {
+      setSuggestionsData(data);
+      if (data?.suggestions && data.suggestions.length > 0) {
+        setAutoPilotPrompt(data.suggestions[0]);
+      }
+    }).catch(() => {});
+  }, []);
 
 
   const handleRunVerification = async () => {
@@ -134,8 +145,14 @@ export const VerificationCenter = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-slate-400 text-[11px] font-medium">Try instantly:</span>
-          {["Stop guest from reaching HR", "Isolate database from guest", "Block all traffic between guest and HR"].map((ex, i) => (
+          <span className="text-slate-400 text-[11px] font-medium">
+            Try on {suggestionsData?.template_name || 'Network'}:
+          </span>
+          {(suggestionsData?.suggestions?.slice(0, 4) || [
+            "Stop guest from reaching HR",
+            "Isolate database from guest",
+            "Block all traffic between guest and HR"
+          ]).map((ex, i) => (
             <button
               key={i}
               onClick={() => {

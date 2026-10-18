@@ -19,7 +19,7 @@ class IntentUpdate(BaseModel):
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 def create_intent(intent_in: IntentCreate, db: Session = Depends(get_db)):
-    parsed_result = intent_parser.parse(intent_in.natural_language, fallback_on_unrecognized=True)
+    parsed_result = intent_parser.parse(intent_in.natural_language, fallback_on_unrecognized=True, db=db)
     if not parsed_result.get("policies"):
         parsed_result = {
             "status": "parsed",
