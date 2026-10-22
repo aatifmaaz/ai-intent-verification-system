@@ -32,12 +32,13 @@ export const Header: React.FC = () => {
 
   return (
     <>
-      <header className="h-16 bg-slate-850/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-6 sticky top-0 z-40 gap-4">
+      <header className="h-16 bg-slate-850/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between px-3 lg:px-6 sticky top-0 z-40 gap-2">
         {/* Left: Title & Badge */}
-        <div className="flex items-center gap-3 flex-shrink-0">
-          <div className="text-sm font-bold text-white tracking-wide flex items-center gap-2">
+        <div className="flex items-center gap-3 flex-shrink-0 min-w-0">
+          <div className="text-xs xl:text-sm font-bold text-white tracking-wide flex items-center gap-2 whitespace-nowrap">
             <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
-            AI Network Intent Verification
+            <span className="hidden xl:inline">AI Network Intent Verification</span>
+            <span className="xl:hidden">NIV</span>
           </div>
           <span className="hidden xl:inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
             Autonomous Zero-Trust
@@ -47,7 +48,7 @@ export const Header: React.FC = () => {
         {/* Middle: Prominent Global Plain-English AI Command Bar */}
         <form 
           onSubmit={handleQuickAutoPilotSubmit}
-          className="flex-1 max-w-xl mx-2 hidden md:flex items-center relative group"
+          className="flex-1 min-w-0 max-w-xl mx-2 hidden xl:flex items-center relative group"
         >
           <div className="absolute left-3 text-cyan-400 flex items-center pointer-events-none">
             <Sparkles className="w-4 h-4 animate-pulse" />
@@ -73,7 +74,7 @@ export const Header: React.FC = () => {
           {/* Mobile Auto-Pilot Trigger Button */}
           <button
             onClick={() => setIsAutoPilotOpen(true)}
-            className="flex md:hidden items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-lg shadow-sm"
+            className="flex xl:hidden items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-lg shadow-sm"
           >
             <Zap className="w-3 h-3 fill-white" />
             <span>Auto-Pilot</span>
@@ -105,9 +106,9 @@ export const Header: React.FC = () => {
             )}
           </button>
 
-          <div className="flex items-center space-x-2 pl-3 border-l border-slate-800">
+          <div className="flex items-center space-x-2 pl-2 border-l border-slate-800">
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse glow-emerald"></div>
-            <span className="text-xs text-slate-300 font-mono hidden sm:inline">Engine Active</span>
+            <span className="text-xs text-slate-300 font-mono hidden xl:inline">Engine Active</span>
           </div>
         </div>
       </header>

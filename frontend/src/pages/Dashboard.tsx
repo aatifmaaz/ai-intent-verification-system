@@ -27,7 +27,10 @@ export const Dashboard = () => {
     }).catch(() => {});
   }, []);
 
-  if (statsLoading) return <LoadingSpinner message="Loading dashboard statistics..." />;
+  // Keep the dashboard mounted during background refreshes. The auto-pilot
+  // modal owns its result state; unmounting it after enforcement hides the
+  // successful run when onSuccess refreshes dashboard statistics.
+  if (statsLoading && !stats) return <LoadingSpinner message="Loading dashboard statistics..." />;
   if (statsError) return <ErrorMessage message={statsError.message} onRetry={refetchStats} />;
 
   const PIE_COLORS = ['#10b981', '#ef4444', '#f59e0b', '#3b82f6'];
@@ -127,7 +130,7 @@ export const Dashboard = () => {
 
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-white">Network Telemetry &amp; Metrics</h1>
-        <span className="text-xs text-slate-400 font-mono">15 Simulated Nodes Online</span>
+        <span className="text-xs text-slate-400 font-mono">{stats?.total_devices ?? 0} Devices Online</span>
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

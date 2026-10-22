@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from app.database import get_db
+from app.models.intent import Intent, NormalizedPolicy
 
 client = TestClient(app)
 
@@ -57,4 +58,22 @@ def test_auto_enforce_intent():
     data = resp.json()
     assert data["status"] in ["REMEDIATED", "COMPLIANT"]
     assert len(data["steps"]) >= 3
+
+def test_update_intent_reparses_policy(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    intent = Intent(natural_language="Guest users must not communicate with HR", status="parsed")
+    db_session.add(intent)
+    db_session.commit()
+    try:
+        response = TestClient(app).put(f"/api/intents/{intent.id}", json={
+            "natural_language": "Engineering should have access to the application server"
+        })
+        assert response.status_code == 200
+        policy = db_session.query(NormalizedPolicy).filter_by(intent_id=intent.id).one()
+        assert policy.policy_type == "allow"
+        assert policy.action == "permit"
+        assert policy.source_zone == "engineering"
+        assert policy.destination_zone == "application"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 

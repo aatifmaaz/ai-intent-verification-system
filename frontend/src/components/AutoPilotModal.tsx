@@ -14,14 +14,14 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { autoEnforceIntent } from '../api/intents';
-import { getTopologySuggestions, TopologySuggestions } from '../api/topology';
+import { createLink, getTopology, getTopologySuggestions, TopologySuggestions } from '../api/topology';
 import type { AutoEnforceResult } from '../types';
 
 interface AutoPilotModalProps {
   isOpen: boolean;
   onClose: () => void;
   defaultPrompt?: string;
-  onSuccess?: () => void;
+  onSuccess?: (result: AutoEnforceResult) => void;
 }
 
 const DEFAULT_PRESET_INTENTS = [
@@ -45,6 +45,59 @@ export const AutoPilotModal: React.FC<AutoPilotModalProps> = ({
   const [result, setResult] = useState<AutoEnforceResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [suggestionsData, setSuggestionsData] = useState<TopologySuggestions | null>(null);
+  const [isLinkOperation, setIsLinkOperation] = useState(false);
+
+  const parseLinkCommand = (command: string) => {
+    const value = command.trim().replace(/[.!?]+$/, '');
+    const connectMatch = value.match(/^(?:please\s+)?(?:connect|link)\s+(.+?)\s+(?:to|with)\s+(.+?)(?:\s+directly)?$/i);
+    const createMatch = value.match(/^(?:please\s+)?(?:create|add)\s+(?:a\s+)?(?:direct\s+)?(?:link|edge)\s+between\s+(.+?)\s+and\s+(.+?)$/i);
+    const match = connectMatch || createMatch;
+    return match ? [match[1], match[2]].map((name) => name.trim().replace(/^["'`]|["'`]$/g, '')) : null;
+  };
+
+  const connectDevices = async (command: string): Promise<AutoEnforceResult | null> => {
+    const endpoints = parseLinkCommand(command);
+    if (!endpoints) return null;
+    setIsLinkOperation(true);
+    const topology = await getTopology();
+    const findDevice = (requested: string) => topology.devices.find((device) => device.name.toLowerCase() === requested.toLowerCase());
+    const source = findDevice(endpoints[0]);
+    const target = findDevice(endpoints[1]);
+    if (!source || !target) {
+      const missing = !source ? endpoints[0] : endpoints[1];
+      throw new Error(`Could not find node “${missing}”. Use the exact node name shown in the topology.`);
+    }
+    if (source.id === target.id) throw new Error('Choose two different nodes to create a link.');
+
+    const existingLink = topology.links.find((link) =>
+      (link.source_device_id === source.id && link.target_device_id === target.id) ||
+      (link.source_device_id === target.id && link.target_device_id === source.id)
+    );
+    if (!existingLink) {
+      await createLink({
+        source_device_id: source.id,
+        target_device_id: target.id,
+        source_interface: 'eth0',
+        target_interface: 'eth0',
+        link_type: 'ethernet',
+        bandwidth: '1Gbps',
+        status: 'up',
+      });
+    }
+    return {
+      status: 'COMPLIANT',
+      intent: { id: -1, natural_language: command, confidence: 1 },
+      policies: [],
+      remediation_applied: false,
+      steps: [
+        { step: 1, title: 'Command Parsed', detail: `Connect ${source.name} to ${target.name}.`, status: 'completed' },
+        { step: 2, title: 'Nodes Resolved', detail: `Matched ${source.name} and ${target.name} in the current topology.`, status: 'completed' },
+        { step: 3, title: 'Link Check', detail: existingLink ? 'These nodes are already directly connected; no duplicate was created.' : 'No direct link exists yet.', status: 'completed' },
+        { step: 4, title: existingLink ? 'Already Connected' : 'Link Created', detail: existingLink ? 'The existing direct link is present in the graph.' : 'Created an active Ethernet link in the topology graph.', status: 'completed' },
+      ],
+      message: existingLink ? 'These nodes are already directly connected.' : `Created a direct link from ${source.name} to ${target.name}.`,
+    };
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -66,6 +119,7 @@ export const AutoPilotModal: React.FC<AutoPilotModalProps> = ({
     setIsRunning(true);
     setErrorMsg(null);
     setResult(null);
+    setIsLinkOperation(false);
     setActiveStep(1);
 
     const timer1 = setTimeout(() => setActiveStep(2), 400);
@@ -73,13 +127,20 @@ export const AutoPilotModal: React.FC<AutoPilotModalProps> = ({
     const timer3 = setTimeout(() => setActiveStep(4), 1200);
 
     try {
-      const data = await autoEnforceIntent(prompt);
+      const data = await connectDevices(prompt) ?? await autoEnforceIntent(prompt);
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      clearTimeout(timer3);
+      // The API returns only after its synchronous validation/deployment cycle.
+      // Show the deployment and re-verification stages in order before the
+      // parent refreshes its topology data.
+      setActiveStep(data.intent.id === -1 ? 4 : 5);
       setTimeout(() => {
-        setActiveStep(6);
+        setActiveStep(data.intent.id === -1 ? 4 : 6);
         setResult(data);
         setIsRunning(false);
-        if (onSuccess) onSuccess();
-      }, 1600);
+        if (onSuccess) onSuccess(data);
+      }, 500);
     } catch (err: unknown) {
       clearTimeout(timer1);
       clearTimeout(timer2);
@@ -210,6 +271,8 @@ export const AutoPilotModal: React.FC<AutoPilotModalProps> = ({
                     ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                     : result?.status === 'COMPLIANT'
                     ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                    : result?.status === 'FAIL'
+                    ? 'bg-red-500/20 text-red-300 border border-red-500/40'
                     : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 animate-pulse'
                 }`}>
                   {isRunning ? 'Processing Live...' : result?.status}
@@ -217,16 +280,24 @@ export const AutoPilotModal: React.FC<AutoPilotModalProps> = ({
               </div>
 
               {/* 6 Step Indicators */}
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                {[
-                  { step: 1, label: 'NLP Parsing' },
-                  { step: 2, label: 'Audit Graph' },
-                  { step: 3, label: 'Patch Synth' },
-                  { step: 4, label: 'Sandbox Run' },
-                  { step: 5, label: 'Deploy ACL' },
-                  { step: 6, label: 'Re-Verify' },
-                ].map((s) => {
-                  const isDone = activeStep >= s.step;
+              <div className={`grid ${isLinkOperation ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3 sm:grid-cols-6'} gap-2`}>
+                {(isLinkOperation
+                  ? [
+                      { step: 1, label: 'Parse Command' },
+                      { step: 2, label: 'Resolve Nodes' },
+                      { step: 3, label: 'Check Link' },
+                      { step: 4, label: 'Create Link' },
+                    ]
+                  : [
+                      { step: 1, label: 'NLP Parsing' },
+                      { step: 2, label: 'Audit Graph' },
+                      { step: 3, label: 'Patch Synth' },
+                      { step: 4, label: 'Policy Check' },
+                      { step: 5, label: 'Deploy ACL' },
+                      { step: 6, label: 'Re-Verify' },
+                    ]).map((s) => {
+                  const isFailed = result?.steps?.some((item) => item.step === s.step && item.status === 'failed') ?? false;
+                  const isDone = activeStep >= s.step && !isFailed;
                   const isCurrent = activeStep === s.step && isRunning;
                   return (
                     <div
@@ -234,13 +305,15 @@ export const AutoPilotModal: React.FC<AutoPilotModalProps> = ({
                       className={`p-2 rounded-lg border text-center transition-all ${
                         isDone
                           ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
-                          : isCurrent
+                        : isFailed
+                          ? 'bg-red-500/10 border-red-500/40 text-red-400'
+                        : isCurrent
                           ? 'bg-cyan-500/10 border-cyan-500/50 text-cyan-300 animate-pulse'
                           : 'bg-slate-900/60 border-slate-800/80 text-slate-600'
                       }`}
                     >
                       <div className="text-[10px] font-mono font-bold">
-                        {isDone ? '✓ ' : ''}S0{s.step}
+                        {isFailed ? '× ' : isDone ? '✓ ' : ''}S0{s.step}
                       </div>
                       <div className="text-[10px] font-medium truncate mt-0.5">{s.label}</div>
                     </div>
@@ -253,7 +326,9 @@ export const AutoPilotModal: React.FC<AutoPilotModalProps> = ({
                 <div className="space-y-1.5 pt-1">
                   {result.steps.map((st) => (
                     <div key={st.step} className="p-2.5 bg-slate-900 rounded-lg border border-slate-800 text-xs flex items-start gap-2">
-                      <CheckCircle className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                      {st.status === 'failed'
+                        ? <AlertCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0 mt-0.5" />
+                        : <CheckCircle className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0 mt-0.5" />}
                       <div className="min-w-0">
                         <span className="font-bold text-white">{st.title}: </span>
                         <span className="text-slate-300 font-mono text-[11px]">{st.detail}</span>
@@ -270,11 +345,13 @@ export const AutoPilotModal: React.FC<AutoPilotModalProps> = ({
                     <div className="flex items-center gap-2">
                       <FileDiff className="w-4 h-4 text-emerald-400" />
                       <span className="text-xs font-bold text-white">
-                        Patch Auto-Deployed to {(result.repair.affected_devices || []).join(', ')}
+                        {result.remediation_applied
+                          ? `Patch deployed and verified on ${(result.repair.affected_devices || []).join(', ')}`
+                          : `Patch rolled back on ${(result.repair.affected_devices || []).join(', ')}`}
                       </span>
                     </div>
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                      0 Violations Remaining
+                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${result.remediation_applied ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-red-500/20 text-red-300 border border-red-500/40'}`}>
+                      {result.remediation_applied ? 'Verified' : 'Not applied'}
                     </span>
                   </div>
 
@@ -296,7 +373,7 @@ export const AutoPilotModal: React.FC<AutoPilotModalProps> = ({
 
                   <div className="flex items-center justify-between pt-1 text-xs">
                     <span className="text-slate-400 font-mono text-[11px]">
-                      Initial Violations: <strong className="text-red-400">{result.initial_run?.failed ?? 1}</strong> &rarr; Final Violations: <strong className="text-emerald-400">0</strong>
+                      Network-wide failed policies: <strong className="text-red-400">{result.initial_run?.failed ?? 0}</strong> &rarr; <strong className={result.final_run?.failed ? 'text-red-400' : 'text-emerald-400'}>{result.final_run?.failed ?? 0}</strong>
                     </span>
 
                     <div className="flex items-center gap-2">

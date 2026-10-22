@@ -30,6 +30,14 @@ const FALLBACK_INTENTS = [
   "The backup network must remain isolated from ordinary user traffic.",
 ];
 
+const getRequestError = (error: unknown, fallback: string): string => {
+  if (error && typeof error === 'object' && 'response' in error) {
+    const response = (error as { response?: { data?: { detail?: unknown } } }).response;
+    if (typeof response?.data?.detail === 'string') return response.data.detail;
+  }
+  return error instanceof Error ? error.message : fallback;
+};
+
 export const IntentManagement: React.FC = () => {
   const { data: intents, loading, error, refetch } = useApi(getIntents);
   const [activeTab, setActiveTab] = useState<'autopilot' | 'list'>('autopilot');
@@ -53,10 +61,12 @@ export const IntentManagement: React.FC = () => {
   const [activeStepIndex, setActiveStepIndex] = useState<number>(0);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [submittingStandard, setSubmittingStandard] = useState(false);
+  const [intentError, setIntentError] = useState<string | null>(null);
 
   const handleRunAutoPilot = async () => {
     if (!newIntentText.trim()) return;
     setIsRunningAutoPilot(true);
+    setIntentError(null);
     setAutoPilotResult(null);
     setActiveStepIndex(1);
 
@@ -80,8 +90,7 @@ export const IntentManagement: React.FC = () => {
       clearTimeout(timer3);
       setIsRunningAutoPilot(false);
       setActiveStepIndex(0);
-      const msg = err instanceof Error ? err.message : 'Autonomous enforcement failed';
-      alert(`Auto-Pilot Error: ${msg}`);
+      setIntentError(getRequestError(err, 'Autonomous enforcement failed'));
     }
   };
 
@@ -89,13 +98,14 @@ export const IntentManagement: React.FC = () => {
     e.preventDefault();
     if (!newIntentText.trim()) return;
     setSubmittingStandard(true);
+    setIntentError(null);
     try {
       await createIntent(newIntentText);
       setNewIntentText('');
       refetch();
       setActiveTab('list');
     } catch (err) {
-      console.error(err);
+      setIntentError(getRequestError(err, 'Could not save this intent.'));
     } finally {
       setSubmittingStandard(false);
     }
@@ -183,11 +193,19 @@ export const IntentManagement: React.FC = () => {
             <div>
               <textarea
                 value={newIntentText}
-                onChange={(e) => setNewIntentText(e.target.value)}
+                onChange={(e) => {
+                  setNewIntentText(e.target.value);
+                  setIntentError(null);
+                }}
                 rows={3}
                 placeholder="Example: The guest network must not communicate with the HR network."
                 className="w-full p-4 bg-slate-950 font-mono text-sm text-cyan-300 rounded-xl border border-slate-700/80 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 leading-relaxed transition-all"
               />
+              {intentError && (
+                <p role="alert" className="mt-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                  {intentError}
+                </p>
+              )}
             </div>
 
             {/* Dynamic Template Presets */}

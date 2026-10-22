@@ -43,7 +43,7 @@ class IntentParser:
             "management": [
                 "management", "mgmt", "admin", "admins", "administrator", "administrators", 
                 "mgmt-clients", "ssh", "console", "bastion", "bastion-host", 
-                "admin-jump-host", "jump box", "jump host", "switch", "router"
+                "admin-jump-host", "jump box", "jump host"
             ],
             "backup": [
                 "backup", "backup-server", "backups", "storage", "archive", "compliance-audit-logger", "audit logger"
@@ -213,14 +213,21 @@ class IntentParser:
 
         # 1. Match against active database devices directly
         if device_map:
+            # Exact names must win before substring aliases (otherwise
+            # "web-server" captures "web-server2").
+            exact_device = device_map.get(t)
+            if exact_device:
+                return exact_device.zone or exact_device.name
             for dev_name, dev in device_map.items():
-                if t == dev_name or (len(t) > 3 and (t in dev_name or dev_name in t)):
+                if re.search(r'(?<![\w-])' + re.escape(dev_name) + r'(?![\w-])', t):
                     return dev.zone or dev_name
 
         # 2. Match against active database zones directly
         if active_zones:
+            if t in active_zones:
+                return t
             for zone_name in active_zones:
-                if t == zone_name or (len(t) > 3 and (t in zone_name or zone_name in t)):
+                if re.search(r'(?<![\w-])' + re.escape(zone_name) + r'(?![\w-])', t):
                     return zone_name
 
         # 3. Check direct match with known ontology synonyms
@@ -244,6 +251,22 @@ class IntentParser:
             return self._map_to_active_zone(candidate_zone, active_zones, is_destination=is_destination)
 
         return candidate_zone
+
+    def _resolve_endpoint(self, text: str, db=None, is_destination: bool = False) -> tuple[str, Optional[str]]:
+        """Resolve a named device to its zone and host subnet; otherwise resolve a zone."""
+        cleaned = re.sub(r'^(?:the|all devices in the|all|any)\s+', '', text.lower().strip())
+        device_map, _ = self._get_active_topology_context(db)
+        for name, device in sorted(device_map.items(), key=lambda item: len(item[0]), reverse=True):
+            if re.search(r'(?<![\w-])' + re.escape(name) + r'(?![\w-])', cleaned):
+                address = (device.ip_address or '').split('/')[0]
+                if address:
+                    try:
+                        ip = ipaddress.ip_address(address)
+                        return device.zone or name, f'{address}/{ip.max_prefixlen}'
+                    except ValueError:
+                        pass
+                return device.zone or name, None
+        return self._resolve_zone(text, db, is_destination), None
 
     def _resolve_zone_from_cidr(self, cidr: str, db=None, is_destination: bool = False) -> str:
         """Infer security zone from IP CIDR prefix or active topology."""
@@ -417,14 +440,14 @@ class IntentParser:
         for pat in passive_patterns:
             m = re.search(pat, nl)
             if m:
-                z1 = self._resolve_zone(m.group(1), db, is_destination=True)
-                z2 = self._resolve_zone(m.group(2), db, is_destination=False)
-                t1 = self.trust_tiers.get(z1, 3)
-                t2 = self.trust_tiers.get(z2, 1)
-                s_zone, d_zone = (z2, z1) if t2 <= t1 else (z1, z2)
-                if s_zone == d_zone:
-                    s_zone = "guest"
-                    d_zone = "database" if z1 == "guest" else z1
+                z1, n1 = self._resolve_endpoint(m.group(1), db, is_destination=False)
+                z2, n2 = self._resolve_endpoint(m.group(2), db, is_destination=True)
+                s_zone, d_zone = z1, z2
+                if s_zone == d_zone and not (n1 and n2):
+                    if s_zone in ["guest", "leaf", "pos", "biomed", "untrusted"]:
+                        d_zone = "database"
+                    else:
+                        s_zone = "guest"
                 return {
                     "status": "parsed",
                     "confidence": 0.95,
@@ -432,11 +455,90 @@ class IntentParser:
                         "policy_type": "isolate" if ("isolate" in pat or "isolated" in nl) else "deny",
                         "action": "deny",
                         "source_zone": s_zone,
+                        "source_network": n1,
                         "destination_zone": d_zone,
+                        "destination_network": n2,
                         "protocol": detected_proto,
                         "port": detected_port
                     }]
                 }
+
+        # Requirements phrased from the destination's point of view, such as
+        # "The app server must be reachable by engineering".
+        inverse_access_patterns = [
+            (r'(.*?)\s+(?:is|are|must be|should be|needs? to be)\s+(?:accessible|reachable|available)\s+(?:to|by)\s+(.*)', False),
+            (r'(.*?)\s+(?:is|are|must be|should be)\s+not\s+(?:accessible|reachable|available)\s+(?:to|by)\s+(.*)', True),
+        ]
+        for pattern, denied in inverse_access_patterns:
+            match = re.search(pattern, nl)
+            if match:
+                destination = self._resolve_zone(match.group(1), db, is_destination=True)
+                source = self._resolve_zone(match.group(2), db, is_destination=False)
+                return {
+                    "status": "parsed",
+                    "confidence": 0.93,
+                    "policies": [{
+                        "policy_type": "deny" if denied else "allow",
+                        "action": "deny" if denied else "permit",
+                        "source_zone": source,
+                        "destination_zone": destination,
+                        "protocol": detected_proto,
+                        "port": detected_port
+                    }]
+                }
+
+        # "Database access must be restricted to the application server" means
+        # application -> database access is required by this policy.
+        restricted_access = re.search(
+            r'(.*?)\s+access\s+(?:must|should|is required to)\s+(?:remain\s+)?restricted\s+to\s+(.*)',
+            nl
+        )
+        if restricted_access:
+            destination = self._resolve_zone(restricted_access.group(1), db, is_destination=True)
+            source = self._resolve_zone(restricted_access.group(2), db, is_destination=False)
+            return {
+                "status": "parsed",
+                "confidence": 0.92,
+                "policies": [{
+                    "policy_type": "require",
+                    "action": "permit",
+                    "source_zone": source,
+                    "destination_zone": destination,
+                    "protocol": detected_proto,
+                    "port": detected_port
+                }]
+            }
+
+        # Short commands often omit an explicit network verb: "stop X from Y".
+        # Keep X as the initiating endpoint and Y as the destination. Resolve
+        # exact device names to host routes so the ACL remains narrowly scoped.
+        short_deny = re.search(
+            r'^(?:stop|prevent|block|deny|disallow|disconnect)\s+'
+            r'(?:(?:all\s+)?(?:network\s+)?(?:traffic|connections|access)\s+)?(.+?)\s+from\s+'
+            r'(?:accessing\s+|reaching\s+|connecting\s+to\s+|communicating\s+with\s+)?(.+)$',
+            nl
+        )
+        if short_deny and short_deny.group(1).strip() not in {
+            "traffic", "all traffic", "network traffic", "all network traffic",
+            "connections", "all connections", "access", "all access"
+        }:
+            raw_source, raw_destination = short_deny.groups()
+            source, source_network = self._resolve_endpoint(raw_source, db, is_destination=False)
+            destination, destination_network = self._resolve_endpoint(raw_destination, db, is_destination=True)
+            return {
+                "status": "parsed",
+                "confidence": 0.97,
+                "policies": [{
+                    "policy_type": "deny",
+                    "action": "deny",
+                    "source_zone": source,
+                    "source_network": source_network,
+                    "destination_zone": destination,
+                    "destination_network": destination_network,
+                    "protocol": detected_proto,
+                    "port": detected_port
+                }]
+            }
 
         # -------------------------------------------------------------
         # SPECIAL PATTERN 3: Explicit Directional "From X to Y" / Cut off / Shut off
@@ -453,9 +555,9 @@ class IntentParser:
         for pat in from_to_patterns:
             m = re.search(pat, nl)
             if m:
-                s_zone = self._resolve_zone(m.group(1), db, is_destination=False)
-                d_zone = self._resolve_zone(m.group(2), db, is_destination=True)
-                if s_zone == d_zone:
+                s_zone, s_network = self._resolve_endpoint(m.group(1), db, is_destination=False)
+                d_zone, d_network = self._resolve_endpoint(m.group(2), db, is_destination=True)
+                if s_zone == d_zone and not (s_network and d_network):
                     if s_zone in ["guest", "leaf", "pos", "biomed", "untrusted"]:
                         d_zone = "database"
                     else:
@@ -468,7 +570,9 @@ class IntentParser:
                         "policy_type": "deny",
                         "action": "deny",
                         "source_zone": s_zone,
+                        "source_network": s_network,
                         "destination_zone": d_zone,
+                        "destination_network": d_network,
                         "protocol": detected_proto,
                         "port": detected_port
                     }]
@@ -498,6 +602,9 @@ class IntentParser:
             r'nobody\s+(?:from\s+)?(.*?)\s+should\s+(?:touch|reach|access|communicate with|connect to)\s+(.*)',
             r'no\s+one\s+(?:in|from)?\s+(.*?)\s+should\s+(?:be\s+able\s+to\s+)?(?:touch|reach|access|communicate with)\s+(.*)',
             r'(?:do\s+not\s+allow|dont\s+allow|do\s+not\s+let|dont\s+let)\s+(.*?)\s+to\s+(?:touch|reach|access|communicate with|connect to)\s+(.*)',
+            r'keep\s+(.*?)\s+out\s+of\s+(.*)',
+            r'keep\s+(.*?)\s+from\s+(?:accessing|reaching|getting to|connecting to|communicating with)\s+(.*)',
+            r'(.*?)\s+(?:cannot|can\s+not|must\s+not|should\s+not|may\s+not)\s+(?:get to|get into|reach|access|touch|connect to|communicate with|talk to)\s+(.*)',
             r'prevent\s+(.*?)\s+from\s+(?:accessing|reaching|communicating with|talking to|connecting to|touching)\s+(.*)',
             r'stop\s+(.*?)\s+from\s+(?:accessing|reaching|communicating with|talking to|connecting to|touching)\s+(.*)',
             r'(.*?)\s+must\s+not\s+communicate\s+(?:directly\s+)?with\s+(.*)',
@@ -505,6 +612,9 @@ class IntentParser:
             r'(.*?)\s+must\s+not\s+access\s+(.*?)\s+directly',
             r'block\s+(.*?)\s+from\s+(?:reaching|accessing|touching)?\s*(.*)',
             r'(.*?)\s+must\s+remain\s+isolated\s+from\s+(.*)',
+            r'(.*?)\s+(?:(?:must|should|may)\s+not|cannot|can\s+not)\s+(?:be\s+able\s+to\s+)?(?:communicate|talk|connect)\s+with\s+(.*)',
+            r'(.*?)\s+(?:must|should|may)\s+not\s+(?:be\s+able\s+to\s+)?(?:have\s+)?access\s+to\s+(.*)',
+            r'(.*?)\s+(?:must|should)\s+never\s+(?:communicate|talk|connect)\s+with\s+(.*)',
             r'(?:traffic\s+between|connections\s+between)\s+(.*?)\s+and\s+(.*?)\s+must\s+be\s+blocked'
         ]
         for pat in prohibition_patterns:
@@ -560,18 +670,44 @@ class IntentParser:
         # -------------------------------------------------------------
         # SPECIAL PATTERN 6: Allowances / Reachability
         # -------------------------------------------------------------
+        permit_from_to = re.search(
+            r'(?:allow|permit)\s+(?:all\s+)?(?:traffic|connections|access)?\s*from\s+(.+?)\s+to\s+(.+)', nl
+        )
+        if permit_from_to and not is_deny_action:
+            source, source_network = self._resolve_endpoint(permit_from_to.group(1), db, is_destination=False)
+            destination, destination_network = self._resolve_endpoint(permit_from_to.group(2), db, is_destination=True)
+            return {
+                "status": "parsed",
+                "confidence": 0.95,
+                "policies": [{
+                    "policy_type": "allow",
+                    "action": "permit",
+                    "source_zone": source,
+                    "source_network": source_network,
+                    "destination_zone": destination,
+                    "destination_network": destination_network,
+                    "protocol": detected_proto,
+                    "port": detected_port
+                }]
+            }
+
         allow_patterns = [
             r'allow\s+(.*?)\s+to\s+(?:access|reach|communicate with|connect to)\s+(.*)',
             r'permit\s+(.*?)\s+to\s+(?:access|reach|communicate with|connect to)\s+(.*)',
-            r'(.*?)\s+(?:must be able to|can|should be able to)\s+access\s+(.*)',
+            r'(.*?)\s+(?:must|should|needs? to|has to|is required to)\s+(?:be able to\s+)?(?:access|reach|communicate with|connect to|talk to)\s+(.*)',
+            r'(.*?)\s+(?:must|should)\s+have\s+(?:network\s+)?access\s+to\s+(.*)',
+            r'(.*?)\s+(?:must|should)\s+be\s+allowed\s+to\s+(?:access|reach|communicate with|connect to|talk to)\s+(.*)',
+            r'(.*?)\s+(?:is|are)\s+(?:allowed|permitted)\s+to\s+(?:access|reach|communicate with|connect to|talk to)\s+(.*)',
+            r'(.*?)\s+(?:may|requires? to)\s+(?:access|reach|communicate with|connect to|talk to)\s+(.*)',
+            r'(.*?)\s+(?:can|may|should be able to)\s+(?:access|reach|communicate with|connect to|talk to)\s+(.*)',
             r'enable\s+(?:all\s+)?traffic\s+between\s+(.*?)\s+and\s+(.*)'
         ]
         if not is_deny_action:
             for pat in allow_patterns:
                 m = re.search(pat, nl)
                 if m:
-                    s_zone = self._resolve_zone(m.group(1), db, is_destination=False)
-                    d_zone = self._resolve_zone(m.group(2), db, is_destination=True)
+                    s_zone, s_network = self._resolve_endpoint(m.group(1), db, is_destination=False)
+                    d_zone, d_network = self._resolve_endpoint(m.group(2), db, is_destination=True)
                     return {
                         "status": "parsed",
                         "confidence": 0.92,
@@ -579,7 +715,9 @@ class IntentParser:
                             "policy_type": "allow",
                             "action": "permit",
                             "source_zone": s_zone,
+                            "source_network": s_network,
                             "destination_zone": d_zone,
+                            "destination_network": d_network,
                             "protocol": detected_proto,
                             "port": detected_port
                         }]
@@ -601,11 +739,21 @@ class IntentParser:
             if z_name in nl:
                 found_tokens.append((z_name, nl.find(z_name)))
 
-        # Check ontology synonyms
+        # Check ontology synonyms, but don't treat a generic word inside a
+        # recognized device hostname as a separate zone (e.g. "router" in
+        # "edge-router" must not turn the endpoint into the management zone).
+        named_device_spans = []
+        for d_name in device_map:
+            named_device_spans.extend(
+                (match.start(), match.end())
+                for match in re.finditer(r'(?<![\w-])' + re.escape(d_name) + r'(?![\w-])', nl)
+            )
         for std_z, syns in self.zone_synonyms.items():
             for s in syns:
-                if re.search(r'\b' + re.escape(s) + r'\b', nl):
-                    found_tokens.append((std_z, nl.find(s)))
+                for match in re.finditer(r'(?<![\w-])' + re.escape(s) + r'(?![\w-])', nl):
+                    if any(start <= match.start() and match.end() <= end for start, end in named_device_spans):
+                        continue
+                    found_tokens.append((std_z, match.start()))
                     break
 
         seen = set()
@@ -645,57 +793,9 @@ class IntentParser:
                 }]
             }
 
-        # -------------------------------------------------------------
-        # HEURISTIC 2: Single Target Zone Mentioned
-        # -------------------------------------------------------------
-        if len(ordered_zones) == 1:
-            z = ordered_zones[0]
-            if is_deny_action:
-                tier = self.trust_tiers.get(z, 2)
-                if tier >= 3:
-                    src = self._resolve_zone("guest", db, is_destination=False)
-                    dst = self._resolve_zone(z, db, is_destination=True)
-                else:
-                    src = self._resolve_zone(z, db, is_destination=False)
-                    dst = self._resolve_zone("database", db, is_destination=True)
-
-                return {
-                    "status": "parsed",
-                    "confidence": 0.85,
-                    "assumptions": f"Inferred perimeter security policy: isolate untrusted '{src}' from protected '{dst}'.",
-                    "policies": [{
-                        "policy_type": "deny",
-                        "action": "deny",
-                        "source_zone": src,
-                        "destination_zone": dst,
-                        "protocol": detected_proto,
-                        "port": detected_port
-                    }]
-                }
-            else:
-                src = self._resolve_zone(z, db, is_destination=False)
-                dst = self._resolve_zone("internet", db, is_destination=True)
-                return {
-                    "status": "parsed",
-                    "confidence": 0.82,
-                    "assumptions": f"Inferred outbound internet access for '{src}'.",
-                    "policies": [{
-                        "policy_type": "allow",
-                        "action": "permit",
-                        "source_zone": src,
-                        "destination_zone": dst,
-                        "protocol": detected_proto,
-                        "port": detected_port
-                    }]
-                }
-
-        # -------------------------------------------------------------
-        # HEURISTIC 3: Universal Zero-Trust Fallback (Always Produces Clean Active Policy)
-        # -------------------------------------------------------------
-        if fallback_on_unrecognized or is_deny_action or any(w in nl for w in ["lockdown", "zero trust", "secure", "isolate", "protect", "safe"]):
+        if fallback_on_unrecognized:
             src_zone = self._resolve_zone("guest", db, is_destination=False)
             dst_zone = self._resolve_zone("database", db, is_destination=True)
-
             return {
                 "status": "parsed",
                 "confidence": 0.85,
@@ -710,4 +810,9 @@ class IntentParser:
                 }]
             }
 
-        return {"status": "draft", "confidence": 0.0, "policies": []}
+        return {
+            "status": "draft",
+            "confidence": 0.0,
+            "assumptions": "Specify both the source and destination network or device.",
+            "policies": []
+        }

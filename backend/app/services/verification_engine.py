@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
-from app.models import Device, NetworkLink, NormalizedPolicy, VerificationRun, VerificationFinding
+from sqlalchemy import or_
+from app.models import Device, NetworkLink, Intent, NormalizedPolicy, VerificationRun, VerificationFinding
 from app.services.network_graph import NetworkGraph
 
 class VerificationEngine:
@@ -10,7 +11,12 @@ class VerificationEngine:
     def verify(self):
         devices = self.db.query(Device).all()
         links = self.db.query(NetworkLink).all()
-        policies = self.db.query(NormalizedPolicy).all()
+        policies = (
+            self.db.query(NormalizedPolicy)
+            .join(Intent, Intent.id == NormalizedPolicy.intent_id)
+            .filter(or_(Intent.status.is_(None), Intent.status != "archived"))
+            .all()
+        )
 
         run = VerificationRun(
             started_at=datetime.utcnow(),
@@ -52,8 +58,8 @@ class VerificationEngine:
         port = policy.port
         ptype = policy.policy_type.lower()
         
-        src_devices = graph.get_devices_in_zone(src_zone)
-        dst_devices = graph.get_devices_in_zone(dst_zone)
+        src_devices = graph.get_devices_in_zone(src_zone, policy.source_network)
+        dst_devices = graph.get_devices_in_zone(dst_zone, policy.destination_network)
         
         if not src_devices or not dst_devices:
             return VerificationFinding(
@@ -74,8 +80,18 @@ class VerificationEngine:
                     details="Cannot verify due to missing configuration data."
                 )
 
-        evidence_list = graph.get_path_evidence(src_zone, dst_zone, protocol, port)
-        has_permitted = any(e['permitted'] for e in evidence_list)
+        evidence_list = graph.get_path_evidence(
+            src_zone, dst_zone, protocol, port,
+            policy.source_network, policy.destination_network
+        )
+        pair_permitted = {}
+        for evidence in evidence_list:
+            if evidence.get('source_id') is None or evidence.get('destination_id') is None:
+                continue
+            pair = (evidence['source_id'], evidence['destination_id'])
+            pair_permitted[pair] = pair_permitted.get(pair, False) or evidence['permitted']
+        has_permitted = any(pair_permitted.values())
+        all_pairs_permitted = bool(pair_permitted) and all(pair_permitted.values())
         
         status = "UNKNOWN"
         remediation = ""
@@ -95,7 +111,7 @@ class VerificationEngine:
                 status = "PASS"
                 details = f"Traffic correctly isolated from {src_zone} to {dst_zone}."
         elif ptype in ['allow', 'require']:
-            if has_permitted:
+            if all_pairs_permitted:
                 status = "PASS"
                 details = f"Traffic correctly allowed from {src_zone} to {dst_zone}."
             else:

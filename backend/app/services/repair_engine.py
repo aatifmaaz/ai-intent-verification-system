@@ -1,6 +1,9 @@
 import json
+import copy
 from datetime import datetime
-from app.models import RepairProposal, VerificationFinding, NormalizedPolicy, Device, ConfigurationVersion
+from app.models import RepairProposal, VerificationFinding, Intent, NormalizedPolicy, Device, NetworkLink, ConfigurationVersion
+from app.services.network_graph import NetworkGraph
+from app.services.verification_engine import VerificationEngine
 
 class RepairEngine:
     def __init__(self, db_session):
@@ -16,28 +19,23 @@ class RepairEngine:
         # Determine violation type
         ptype = policy.policy_type.lower()
         
-        # Get one of the affected devices (typically firewall or router in path)
-        # Select optimal enforcement point along path (firewall > router > switch)
+        # A repair point must lie on every evaluated route. Choosing any
+        # firewall/router from the union of affected devices can miss an
+        # alternate path, such as the distribution-switch trunk.
         target_device = None
-        if finding.affected_devices:
-            candidates = self.db.query(Device).filter(Device.name.in_(finding.affected_devices)).all()
-            firewalls = [d for d in candidates if d.device_type == 'firewall']
-            routers = [d for d in candidates if d.device_type == 'router']
-            switches = [d for d in candidates if d.device_type == 'switch']
-            if firewalls:
-                target_device = firewalls[0]
-            elif routers:
-                target_device = routers[0]
-            elif switches:
-                target_device = switches[0]
-            elif candidates:
-                target_device = candidates[0]
+        path_sets = [
+            set(item.get('path', []))
+            for item in (finding.evidence or {}).get('path_evaluations', [])
+            if item.get('path')
+        ]
+        common_path_names = set.intersection(*path_sets) if path_sets else set()
+        candidates = self.db.query(Device).filter(Device.name.in_(common_path_names)).all() if common_path_names else []
+        for device_type in ('firewall', 'router', 'switch'):
+            typed = [device for device in candidates if device.device_type == device_type]
+            if typed:
+                target_device = typed[0]
+                break
 
-        if not target_device:
-            target_device = self.db.query(Device).filter(Device.device_type == 'firewall').first() or \
-                            self.db.query(Device).filter(Device.device_type == 'router').first() or \
-                            self.db.query(Device).first()
-            
         if not target_device:
             return None
             
@@ -128,16 +126,78 @@ class RepairEngine:
         if not proposal:
             return {"valid": False, "error": "Proposal not found"}
             
-        # Isolated schema and syntax validation
+        # Validate ACL shape and rule values before evaluating the proposed
+        # configuration against an isolated copy of the live graph.
         proposed = proposal.proposed_config or {}
         if not isinstance(proposed, dict) or 'acls' not in proposed:
             proposal.validation_status = "invalid"
             self.db.commit()
             return {"valid": False, "error": "Invalid configuration structure"}
 
+        if not isinstance(proposed['acls'], list):
+            proposal.validation_status = "invalid"
+            self.db.commit()
+            return {"valid": False, "error": "ACL collection must be a list"}
+
+        for acl in proposed['acls']:
+            if not isinstance(acl, dict) or not isinstance(acl.get('rules'), list):
+                proposal.validation_status = "invalid"
+                self.db.commit()
+                return {"valid": False, "error": "Each ACL must contain a rule list"}
+            for rule in acl['rules']:
+                if not isinstance(rule, dict) or rule.get('action') not in {'permit', 'deny'}:
+                    proposal.validation_status = "invalid"
+                    self.db.commit()
+                    return {"valid": False, "error": "ACL rules must have a permit or deny action"}
+
+        target_policy = self.db.query(NormalizedPolicy).filter_by(id=proposal.policy_id).first()
+        target_device_name = (proposal.affected_devices or [None])[0]
+        target_device = self.db.query(Device).filter_by(name=target_device_name).first()
+        if not target_policy or not target_device:
+            proposal.validation_status = "invalid"
+            self.db.commit()
+            return {"valid": False, "error": "Repair target or policy no longer exists"}
+
+        devices = self.db.query(Device).all()
+        links = self.db.query(NetworkLink).all()
+        before_graph = NetworkGraph(devices, links)
+        simulated_devices = []
+        for device in devices:
+            if device.id == target_device.id:
+                simulated_device = copy.copy(device)
+                simulated_device.config = proposed
+                simulated_devices.append(simulated_device)
+            else:
+                simulated_devices.append(device)
+        after_graph = NetworkGraph(simulated_devices, links)
+        verifier = VerificationEngine(self.db)
+        after_target = verifier._evaluate_policy(after_graph, target_policy, None)
+        if after_target.status != "PASS":
+            proposal.validation_status = "invalid"
+            self.db.commit()
+            return {"valid": False, "error": "Proposed ACL does not satisfy the requested policy on the full topology"}
+
+        policies = (
+            self.db.query(NormalizedPolicy)
+            .join(Intent, Intent.id == NormalizedPolicy.intent_id)
+            .filter((Intent.status.is_(None)) | (Intent.status != "archived"))
+            .all()
+        )
+        for existing_policy in policies:
+            if existing_policy.id == target_policy.id:
+                continue
+            before = verifier._evaluate_policy(before_graph, existing_policy, None)
+            if before.status != "PASS":
+                continue
+            after = verifier._evaluate_policy(after_graph, existing_policy, None)
+            if after.status == "FAIL":
+                proposal.validation_status = "invalid"
+                self.db.commit()
+                return {"valid": False, "error": f"Proposed ACL would break existing policy {existing_policy.id}"}
+
         proposal.validation_status = "valid"
         self.db.commit()
-        return {"valid": True, "status": "valid", "message": "Patch validated against schema and isolation test passed"}
+        return {"valid": True, "status": "valid", "message": "ACL schema, requested policy, and passing-policy regressions validated in an isolated graph"}
 
     def apply_repair(self, repair_id):
         proposal = self.db.query(RepairProposal).filter(RepairProposal.id == repair_id).first()

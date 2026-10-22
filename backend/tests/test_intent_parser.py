@@ -22,6 +22,39 @@ def test_allow_intent_parsing():
     assert p["policy_type"] == "allow"
     assert p["action"] == "permit"
 
+def test_everyday_english_access_requirements():
+    parser = IntentParser()
+    cases = [
+        ("Engineering should have access to the application server", "engineering", "application"),
+        ("The application server must be reachable by engineering", "engineering", "application"),
+        ("Engineering is permitted to connect to the application server", "engineering", "application"),
+    ]
+    for sentence, expected_source, expected_destination in cases:
+        result = parser.parse(sentence)
+        policy = result["policies"][0]
+        assert policy["action"] == "permit", sentence
+        assert policy["source_zone"] == expected_source, sentence
+        assert policy["destination_zone"] == expected_destination, sentence
+
+def test_everyday_english_denials_and_restricted_access():
+    parser = IntentParser()
+    for sentence, expected_destination in (
+        ("Guests cannot communicate with the database", "database"),
+        ("Keep guest users out of HR", "hr"),
+        ("Guest users must not be able to connect to HR", "hr"),
+    ):
+        policy = parser.parse(sentence)["policies"][0]
+        assert policy["action"] == "deny", sentence
+        assert policy["source_zone"] == "guest", sentence
+        assert policy["destination_zone"] == expected_destination, sentence
+
+    result = parser.parse("Database access must remain restricted to the application server")
+    policy = result["policies"][0]
+    assert policy["policy_type"] == "require"
+    assert policy["action"] == "permit"
+    assert policy["source_zone"] == "application"
+    assert policy["destination_zone"] == "database"
+
 def test_isolate_intent_parsing():
     parser = IntentParser()
     res = parser.parse("The backup network must remain isolated from ordinary user traffic.")
@@ -46,6 +79,18 @@ def test_cidr_explicit_intent_parsing():
     assert p["action"] == "deny"
     assert p["source_network"] == "10.1.30.0/24"
     assert p["destination_network"] == "10.1.60.0/24"
+
+def test_short_device_to_device_deny_command_uses_host_routes(db_session):
+    parser = IntentParser()
+    result = parser.parse("stop edge-router from core-router", db=db_session)
+
+    assert result["status"] == "parsed"
+    policy = result["policies"][0]
+    assert policy["action"] == "deny"
+    assert policy["source_zone"] == "edge"
+    assert policy["destination_zone"] == "core"
+    assert policy["source_network"] == "10.0.1.1/32"
+    assert policy["destination_network"] == "10.0.0.1/32"
 
 def test_inverted_asset_protection_parsing():
     parser = IntentParser()

@@ -67,7 +67,8 @@ export const VerificationCenter = () => {
   if (error) return <ErrorMessage message={error.message} onRetry={refetch} />;
 
   // Get the latest run (either from direct run or from history)
-  const displayRun = latestRun || (runs && runs.length > 0 ? runs[runs.length - 1] : null);
+  // The API returns runs newest-first; use index 0 as the current result.
+  const displayRun = latestRun || (runs && runs.length > 0 ? runs[0] : null);
   const findings: VerificationFinding[] = displayRun?.findings || [];
   const filteredFindings = statusFilter === 'all' ? findings : findings.filter(f => f.status === statusFilter);
 
@@ -351,7 +352,7 @@ export const VerificationCenter = () => {
         <div className="card p-4">
           <h3 className="text-sm font-semibold text-slate-400 mb-3">Previous Runs</h3>
           <div className="space-y-2">
-            {runs.slice(0, -1).reverse().map((run: VerificationRun) => (
+            {runs.slice(1).reverse().map((run: VerificationRun) => (
               <div
                 key={run.id}
                 className="flex items-center justify-between p-2 rounded bg-slate-800/50 hover:bg-slate-800 cursor-pointer transition-colors"

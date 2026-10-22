@@ -12,13 +12,16 @@ import {
   Cloud, 
   HeartPulse, 
   Landmark,
-  ArrowRight
+  ArrowRight,
+  Link2
 } from 'lucide-react';
 import { 
   getTopologyTemplates, 
   loadTopologyTemplate, 
   importCustomTopology, 
   createDevice,
+  createLink,
+  getTopology,
   TopologyTemplate 
 } from '../api/topology';
 
@@ -63,8 +66,11 @@ export const TopologyManagerModal: React.FC<TopologyManagerModalProps> = ({
   onClose,
   onTopologyChanged
 }) => {
-  const [activeTab, setActiveTab] = useState<'templates' | 'import' | 'addDevice'>('templates');
+  const [activeTab, setActiveTab] = useState<'templates' | 'import' | 'addDevice' | 'connectDevices'>('templates');
   const [templates, setTemplates] = useState<TopologyTemplate[]>([]);
+  const [topologyDevices, setTopologyDevices] = useState<Array<{ id: number; name: string }>>([]);
+  const [sourceDeviceId, setSourceDeviceId] = useState('');
+  const [targetDeviceId, setTargetDeviceId] = useState('');
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('enterprise');
   
@@ -93,6 +99,13 @@ export const TopologyManagerModal: React.FC<TopologyManagerModalProps> = ({
         .catch(() => {
           setLoadingTemplates(false);
         });
+      getTopology().then((topology) => {
+        setTopologyDevices(topology.devices);
+        const webServer = topology.devices.find((device) => device.name.toLowerCase() === 'web-server2');
+        const firewall = topology.devices.find((device) => device.name.toLowerCase() === 'main-firewall');
+        setSourceDeviceId(String(webServer?.id ?? ''));
+        setTargetDeviceId(String(firewall?.id ?? ''));
+      }).catch(() => setTopologyDevices([]));
     }
   }, [isOpen]);
 
@@ -162,6 +175,48 @@ export const TopologyManagerModal: React.FC<TopologyManagerModalProps> = ({
       }, 1200);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to create device';
+      setErrorMessage(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleConnectDevices = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const sourceId = Number(sourceDeviceId);
+    const targetId = Number(targetDeviceId);
+    if (!sourceId || !targetId || sourceId === targetId) {
+      setErrorMessage('Choose two different devices to connect.');
+      return;
+    }
+    setIsSubmitting(true);
+    setStatusNotice(null);
+    setErrorMessage(null);
+    try {
+      const topology = await getTopology();
+      const alreadyConnected = topology.links.some((link) =>
+        (link.source_device_id === sourceId && link.target_device_id === targetId) ||
+        (link.source_device_id === targetId && link.target_device_id === sourceId)
+      );
+      if (alreadyConnected) {
+        setErrorMessage('These devices already have a physical link.');
+        return;
+      }
+      await createLink({
+        source_device_id: sourceId,
+        target_device_id: targetId,
+        source_interface: 'eth0',
+        target_interface: 'eth0',
+        link_type: 'ethernet',
+        bandwidth: '1 Gbps',
+        status: 'up'
+      });
+      const source = topologyDevices.find((device) => device.id === sourceId)?.name || 'Device';
+      const target = topologyDevices.find((device) => device.id === targetId)?.name || 'Device';
+      setStatusNotice(`Physical link created: ${source} ↔ ${target}.`);
+      onTopologyChanged();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to create device link';
       setErrorMessage(msg);
     } finally {
       setIsSubmitting(false);
@@ -239,6 +294,13 @@ export const TopologyManagerModal: React.FC<TopologyManagerModalProps> = ({
           >
             <PlusCircle className="w-4 h-4" />
             + Add Node / Device
+          </button>
+          <button
+            onClick={() => setActiveTab('connectDevices')}
+            className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 transition-colors ${activeTab === 'connectDevices' ? 'border-cyan-400 text-cyan-400' : 'border-transparent text-slate-400 hover:text-white'}`}
+          >
+            <Link2 className="w-4 h-4" />
+            Connect Devices
           </button>
         </div>
 
@@ -495,6 +557,43 @@ export const TopologyManagerModal: React.FC<TopologyManagerModalProps> = ({
                   )}
                 </button>
               </div>
+            </form>
+          )}
+
+          {activeTab === 'connectDevices' && (
+            <form onSubmit={handleConnectDevices} className="space-y-5 max-w-xl mx-auto">
+              <div className="p-3 bg-cyan-950/20 border border-cyan-500/30 rounded-xl text-xs text-cyan-200">
+                Create a physical topology link between two existing devices. This changes the graph connection, not firewall access rules.
+              </div>
+              {topologyDevices.length < 2 ? (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-200">At least two devices must exist in the topology before they can be connected.</div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] items-end gap-3">
+                    <label className="space-y-1.5 text-xs font-bold text-slate-300 uppercase">
+                      First device
+                      <select value={sourceDeviceId} onChange={(e) => setSourceDeviceId(e.target.value)} className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-slate-200 focus:outline-none focus:border-cyan-500">
+                        <option value="">Select a device</option>
+                        {topologyDevices.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
+                      </select>
+                    </label>
+                    <Link2 className="w-5 h-5 text-cyan-400 mx-auto mb-2" />
+                    <label className="space-y-1.5 text-xs font-bold text-slate-300 uppercase">
+                      Second device
+                      <select value={targetDeviceId} onChange={(e) => setTargetDeviceId(e.target.value)} className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs font-mono text-slate-200 focus:outline-none focus:border-cyan-500">
+                        <option value="">Select a device</option>
+                        {topologyDevices.map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="flex justify-end">
+                    <button type="submit" disabled={isSubmitting || !sourceDeviceId || !targetDeviceId || sourceDeviceId === targetDeviceId} className="flex items-center gap-2 px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-lg disabled:opacity-50">
+                      {isSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+                      {isSubmitting ? 'Connecting…' : 'Create Physical Link'}
+                    </button>
+                  </div>
+                </>
+              )}
             </form>
           )}
         </div>

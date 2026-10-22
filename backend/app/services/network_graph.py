@@ -1,6 +1,7 @@
 import networkx as nx
 import ipaddress
 import json
+import re
 
 class NetworkGraph:
     def __init__(self, devices, links):
@@ -12,6 +13,7 @@ class NetworkGraph:
                 d.id,
                 name=d.name,
                 ip=d.ip_address,
+                subnet=d.subnet,
                 zone=d.zone,
                 vlan=d.vlan_id,
                 type=d.device_type,
@@ -22,14 +24,17 @@ class NetworkGraph:
             self.graph.add_edge(link.source_device_id, link.target_device_id, link=link)
             self.graph.add_edge(link.target_device_id, link.source_device_id, link=link) # Assuming bidirectional links
             
-    def get_devices_in_zone(self, zone):
+    def get_devices_in_zone(self, zone, network=None):
         if not zone:
             return []
         z_clean = str(zone).lower().strip()
-        matches = [node for node, data in self.graph.nodes(data=True) if data.get('zone') and (data.get('zone').lower() == z_clean or data.get('zone').lower() in z_clean or z_clean in data.get('zone').lower())]
+        matches = [node for node, data in self.graph.nodes(data=True) if data.get('zone') and data.get('zone').lower() == z_clean]
         if not matches:
             # Check device names or aliases
-            matches = [node for node, data in self.graph.nodes(data=True) if data.get('name') and (data.get('name').lower() in z_clean or z_clean in data.get('name').lower())]
+            matches = [
+                node for node, data in self.graph.nodes(data=True)
+                if data.get('name') and re.search(r'(?<![\w-])' + re.escape(data.get('name').lower()) + r'(?![\w-])', z_clean)
+            ]
         if not matches:
             # Synonym and category resolution for arbitrary custom user inputs
             synonym_map = {
@@ -55,18 +60,38 @@ class NetworkGraph:
                 matches = [node for node, data in self.graph.nodes(data=True) if data.get('device_type') == 'server']
             else:
                 matches = [node for node, data in self.graph.nodes(data=True) if data.get('device_type') == 'client']
-        return matches or list(self.graph.nodes())[:1]
+        if network:
+            try:
+                requested = ipaddress.ip_network(network, strict=False)
+                matches = [node for node in matches if self._device_matches_network(node, requested)]
+            except ValueError:
+                return []
+        return matches
+
+    def _device_matches_network(self, device_id, requested):
+        data = self.graph.nodes[device_id]
+        for value in (data.get('ip'), data.get('subnet')):
+            if not value:
+                continue
+            try:
+                candidate = ipaddress.ip_network(value if '/' in value else f'{value}/{ipaddress.ip_address(value).max_prefixlen}', strict=False)
+                if candidate.overlaps(requested):
+                    return True
+            except ValueError:
+                continue
+        return False
 
 
 
     def is_subnet_match(self, ip_or_subnet, acl_network):
-        if acl_network == "any" or ip_or_subnet == "any":
+        if acl_network == "any":
             return True
+        if ip_or_subnet == "any":
+            return False
         try:
-            # Handle possible string formats
             n1 = ipaddress.ip_network(ip_or_subnet, strict=False)
             n2 = ipaddress.ip_network(acl_network, strict=False)
-            return n1.overlaps(n2)
+            return n1.subnet_of(n2)
         except ValueError:
             return False
 
@@ -108,9 +133,9 @@ class NetworkGraph:
                         
         return permit, evidence
 
-    def get_all_paths(self, source_zone, dest_zone):
-        src_devices = self.get_devices_in_zone(source_zone)
-        dst_devices = self.get_devices_in_zone(dest_zone)
+    def get_all_paths(self, source_zone, dest_zone, source_network=None, destination_network=None):
+        src_devices = self.get_devices_in_zone(source_zone, source_network)
+        dst_devices = self.get_devices_in_zone(dest_zone, destination_network)
         
         all_paths = []
         for src in src_devices:
@@ -122,43 +147,55 @@ class NetworkGraph:
                     pass
         return all_paths
 
-    def has_permitted_path(self, source_zone, dest_zone, protocol=None, port=None):
-        evidence = self.get_path_evidence(source_zone, dest_zone, protocol, port)
+    def has_permitted_path(self, source_zone, dest_zone, protocol=None, port=None, source_network=None, destination_network=None):
+        evidence = self.get_path_evidence(source_zone, dest_zone, protocol, port, source_network, destination_network)
         # Returns True if at least one fully permitted path exists
         return any(path_info['permitted'] for path_info in evidence)
 
-    def get_path_evidence(self, source_zone, dest_zone, protocol=None, port=None):
-        src_devices = self.get_devices_in_zone(source_zone)
-        dst_devices = self.get_devices_in_zone(dest_zone)
+    def get_path_evidence(self, source_zone, dest_zone, protocol=None, port=None, source_network=None, destination_network=None):
+        src_devices = self.get_devices_in_zone(source_zone, source_network)
+        dst_devices = self.get_devices_in_zone(dest_zone, destination_network)
         
         if not src_devices or not dst_devices:
             return []
             
-        all_paths = self.get_all_paths(source_zone, dest_zone)
         evidence_list = []
-        
-        for path in all_paths:
-            path_permitted = True
-            hop_evidence = []
-            
-            src_ip = self.graph.nodes[path[0]].get('ip', 'any')
-            dst_ip = self.graph.nodes[path[-1]].get('ip', 'any')
-            
-            for hop in path:
-                permit, reason = self.check_acl_permits(hop, src_ip, dst_ip, protocol, port)
-                hop_evidence.append({
-                    "device": self.graph.nodes[hop].get('name'),
-                    "device_id": hop,
-                    "permitted": permit,
-                    "reason": reason
-                })
-                if not permit:
+        for src in src_devices:
+            for dst in dst_devices:
+                if src == dst:
+                    continue
+                src_ip = self.graph.nodes[src].get('ip', 'any')
+                dst_ip = self.graph.nodes[dst].get('ip', 'any')
+                permitted_nodes = [
+                    node for node in self.graph.nodes
+                    if self.check_acl_permits(node, src_ip, dst_ip, protocol, port)[0]
+                ]
+                permitted_graph = self.graph.subgraph(permitted_nodes)
+                if src in permitted_graph and dst in permitted_graph and nx.has_path(permitted_graph, src, dst):
+                    path = nx.shortest_path(permitted_graph, src, dst)
+                    path_permitted = True
+                elif nx.has_path(self.graph, src, dst):
+                    path = nx.shortest_path(self.graph, src, dst)
                     path_permitted = False
-                    
-            evidence_list.append({
-                "path": [self.graph.nodes[n].get('name') for n in path],
-                "permitted": path_permitted,
-                "hops": hop_evidence
-            })
+                else:
+                    evidence_list.append({"path": [], "permitted": False, "source_id": src, "destination_id": dst, "hops": [], "reason": "No physical path"})
+                    continue
+
+                hop_evidence = []
+                for hop in path:
+                    permit, reason = self.check_acl_permits(hop, src_ip, dst_ip, protocol, port)
+                    hop_evidence.append({
+                        "device": self.graph.nodes[hop].get('name'),
+                        "device_id": hop,
+                        "permitted": permit,
+                        "reason": reason
+                    })
+                evidence_list.append({
+                    "path": [self.graph.nodes[n].get('name') for n in path],
+                    "source_id": src,
+                    "destination_id": dst,
+                    "permitted": path_permitted,
+                    "hops": hop_evidence
+                })
             
         return evidence_list

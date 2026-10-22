@@ -27,6 +27,21 @@ export interface NetworkLink {
 export interface TopologyData {
   devices: Device[];
   links: NetworkLink[];
+  active_requirements?: Array<{
+    intent_id: number;
+    natural_language: string;
+    policies: Array<{
+      id: number;
+      policy_type: string;
+      action: string;
+      source_zone: string | null;
+      source_network?: string | null;
+      destination_zone: string | null;
+      destination_network?: string | null;
+      protocol?: string | null;
+      port?: string | null;
+    }>;
+  }>;
 }
 
 export interface NormalizedPolicy {
@@ -208,7 +223,9 @@ export interface AutoEnforceResult {
     id: number;
     type: string;
     source: string;
+    source_network?: string | null;
     dest: string;
+    destination_network?: string | null;
   }>;
   repair?: {
     id: number;

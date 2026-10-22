@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.models.device import Device
 from app.models.network_link import NetworkLink
-from app.models.intent import NormalizedPolicy
+from app.models.intent import Intent, NormalizedPolicy
 from app.models.verification import VerificationRun
 from app.models.repair import RepairProposal
 
@@ -35,6 +35,25 @@ class LinkCreate(BaseModel):
 def get_topology(db: Session = Depends(get_db)):
     devices = db.query(Device).all()
     links = db.query(NetworkLink).all()
+    active_intents = db.query(Intent).filter(Intent.status == "active").order_by(Intent.id.desc()).limit(20).all()
+    active_requirements = []
+    for intent in active_intents:
+        policies = db.query(NormalizedPolicy).filter(NormalizedPolicy.intent_id == intent.id).all()
+        active_requirements.append({
+            "intent_id": intent.id,
+            "natural_language": intent.natural_language,
+            "policies": [{
+                "id": p.id,
+                "policy_type": p.policy_type,
+                "action": p.action,
+                "source_zone": p.source_zone,
+                "source_network": p.source_network,
+                "destination_zone": p.destination_zone,
+                "destination_network": p.destination_network,
+                "protocol": p.protocol,
+                "port": p.port,
+            } for p in policies]
+        })
     
     return {
         "devices": [
@@ -50,7 +69,8 @@ def get_topology(db: Session = Depends(get_db)):
                 "source_interface": l.source_interface, "target_interface": l.target_interface,
                 "link_type": l.link_type, "bandwidth": l.bandwidth, "status": l.status
             } for l in links
-        ]
+        ],
+        "active_requirements": active_requirements
     }
 
 @router.post("/devices", status_code=status.HTTP_201_CREATED)

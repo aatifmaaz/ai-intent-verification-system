@@ -45,6 +45,7 @@ const TYPE_CONFIG: Record<string, { bg: string; border: string; glow: string; la
 };
 
 type LayoutMode = 'tiered' | 'zones' | 'radial';
+type TopologyTab = 'graph' | 'commands';
 
 export const Topology: React.FC = () => {
   const { data, loading, error, refetch } = useApi(getTopology);
@@ -61,6 +62,7 @@ export const Topology: React.FC = () => {
   const [suggestionsData, setSuggestionsData] = useState<TopologySuggestions | null>(null);
   const [isAutoPilotOpen, setIsAutoPilotOpen] = useState(false);
   const [autoPilotPrompt, setAutoPilotPrompt] = useState('');
+  const [activeTab, setActiveTab] = useState<TopologyTab>('graph');
 
   useEffect(() => {
     getTopologySuggestions()
@@ -115,17 +117,17 @@ export const Topology: React.FC = () => {
         }
       });
 
-      const tierY = [80, 200, 340, 480];
+      const tierY = [88, 222, 360, 498];
+      const tierStartX = 150;
+      const tierEndX = width - 82;
       [0, 1, 2, 3].forEach((tierIndex) => {
         const devs = tierMap[tierIndex];
         const count = devs.length;
         if (count === 0) return;
-        const totalSpan = Math.min(width - 160, Math.max(300, count * 140));
-        const startX = centerX - totalSpan / 2;
-        const step = count > 1 ? totalSpan / (count - 1) : 0;
+        const step = count > 1 ? (tierEndX - tierStartX) / (count - 1) : 0;
 
         devs.forEach((dev, idx) => {
-          const x = count === 1 ? centerX : startX + idx * step;
+          const x = count === 1 ? (tierStartX + tierEndX) / 2 : tierStartX + idx * step;
           const y = tierY[tierIndex];
           newPositions.set(dev.id, { id: dev.id, x, y, device: dev });
         });
@@ -141,7 +143,7 @@ export const Topology: React.FC = () => {
 
       const zoneKeys = Object.keys(zoneGroups);
       const zoneCount = zoneKeys.length;
-      const clusterRadius = Math.min(width, height) * 0.36;
+      const clusterRadius = Math.min(width, height) * 0.34;
 
       zoneKeys.forEach((zk, zIdx) => {
         const zoneAngle = (2 * Math.PI * zIdx) / (zoneCount || 1) - Math.PI / 2;
@@ -151,7 +153,7 @@ export const Topology: React.FC = () => {
         const devs = zoneGroups[zk];
         devs.forEach((dev, dIdx) => {
           const subAngle = (2 * Math.PI * dIdx) / (devs.length || 1);
-          const subDist = devs.length > 1 ? 40 : 0;
+        const subDist = devs.length > 1 ? 76 : 0;
           const x = groupCenterX + Math.cos(subAngle) * subDist;
           const y = groupCenterY + Math.sin(subAngle) * subDist;
           newPositions.set(dev.id, { id: dev.id, x, y, device: dev });
@@ -217,6 +219,51 @@ export const Topology: React.FC = () => {
 
       const positions = positionsRef.current;
       const links = data?.links || [];
+      const activeRequirement = data?.active_requirements?.[0];
+      const activePolicy = activeRequirement?.policies?.[0];
+      const endpointMatches = (device: Device, zone: string | null | undefined, network: string | null | undefined) => {
+        if (network) {
+          const host = network.split('/')[0];
+          if (device.ip_address === host || device.subnet === network) return true;
+          if (network.includes('/') && device.subnet === network) return true;
+          return false;
+        }
+        return Boolean(zone && device.zone?.toLowerCase() === zone.toLowerCase());
+      };
+      const sourceDevices = activePolicy
+        ? (data?.devices || []).filter((device) => endpointMatches(device, activePolicy.source_zone, activePolicy.source_network))
+        : [];
+      const destinationDevices = activePolicy
+        ? (data?.devices || []).filter((device) => endpointMatches(device, activePolicy.destination_zone, activePolicy.destination_network))
+        : [];
+      const destinationIds = new Set(destinationDevices.map((device) => device.id));
+      const policyPathLinkIds = new Set<number>();
+      for (const source of sourceDevices) {
+        const queue = [source.id];
+        const previous = new Map<number, { node: number; link: NetworkLink }>();
+        const visited = new Set(queue);
+        let found: number | null = null;
+        while (queue.length && found === null) {
+          const current = queue.shift()!;
+          if (destinationIds.has(current)) { found = current; break; }
+          for (const link of links) {
+            const next = link.source_device_id === current ? link.target_device_id
+              : link.target_device_id === current ? link.source_device_id : null;
+            if (next === null || visited.has(next)) continue;
+            visited.add(next);
+            previous.set(next, { node: current, link });
+            queue.push(next);
+          }
+        }
+        if (found === null || found === source.id) continue;
+        let cursor = found;
+        while (previous.has(cursor)) {
+          const step = previous.get(cursor)!;
+          policyPathLinkIds.add(step.link.id);
+          cursor = step.node;
+        }
+        if (policyPathLinkIds.size) break;
+      }
 
       // Advance pulse offset for packet animation
       if (animatingTraffic) {
@@ -247,6 +294,28 @@ export const Topology: React.FC = () => {
       }
       ctx.restore();
 
+      if (layoutMode === 'tiered') {
+        const lanes = [
+          { y: 88, label: 'PERIMETER' },
+          { y: 222, label: 'CORE & DISTRIBUTION' },
+          { y: 360, label: 'SERVICES' },
+          { y: 498, label: 'ENDPOINTS' },
+        ];
+        lanes.forEach(({ y, label }, index) => {
+          ctx.beginPath();
+          ctx.roundRect(18, y - 36, width - 36, 72, 13);
+          ctx.fillStyle = index % 2 === 0 ? 'rgba(15, 23, 42, 0.44)' : 'rgba(30, 41, 59, 0.24)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(71, 85, 105, 0.22)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.fillStyle = '#64748b';
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'left';
+          ctx.fillText(label, 28, y - 25);
+        });
+      }
+
       // Draw Links
       links.forEach((link: NetworkLink) => {
         const src = positions.get(link.source_device_id);
@@ -264,35 +333,84 @@ export const Topology: React.FC = () => {
         const isDimmed = zoneFilter !== 'all' && !srcMatches && !tgtMatches;
 
         const isHighlighted = isLinkSelected || isConnectedToSelected || isConnectedToHovered;
+        const isPolicyPath = policyPathLinkIds.has(link.id);
+        const isDeniedPolicyPath = isPolicyPath && (
+          activePolicy?.action === 'deny' || activePolicy?.policy_type === 'deny' || activePolicy?.policy_type === 'isolate'
+        );
 
-        // Draw line
-        ctx.beginPath();
-        ctx.moveTo(src.x, src.y);
-        ctx.lineTo(tgt.x, tgt.y);
+        // A denied policy breaks the visual traffic path with an X marker; the
+        // underlying device-to-device topology link remains physically present.
+        if (isDeniedPolicyPath) {
+          const dx = tgt.x - src.x;
+          const dy = tgt.y - src.y;
+          ctx.strokeStyle = '#fb7185';
+          ctx.lineWidth = 4;
+          ctx.setLineDash([8, 5]);
+          ctx.shadowColor = '#fb7185';
+          ctx.shadowBlur = 9;
+          for (const [start, end] of [[0, 0.38], [0.62, 1]]) {
+            ctx.beginPath();
+            ctx.moveTo(src.x + dx * start, src.y + dy * start);
+            ctx.lineTo(src.x + dx * end, src.y + dy * end);
+            ctx.stroke();
+          }
+          ctx.setLineDash([]);
+          ctx.shadowBlur = 0;
 
-        if (isHighlighted) {
-          ctx.strokeStyle = '#22d3ee';
-          ctx.lineWidth = 2.5;
-          ctx.shadowColor = 'rgba(34, 211, 238, 0.6)';
-          ctx.shadowBlur = 8;
-        } else if (link.status === 'down') {
-          ctx.strokeStyle = '#ef4444';
-          ctx.lineWidth = 1.8;
-          ctx.shadowBlur = 0;
-        } else if (isDimmed) {
-          ctx.strokeStyle = '#1e293b';
-          ctx.lineWidth = 1;
-          ctx.shadowBlur = 0;
+          const midX = src.x + dx * 0.5;
+          const midY = src.y + dy * 0.5;
+          ctx.beginPath();
+          ctx.arc(midX, midY, 9, 0, 2 * Math.PI);
+          ctx.fillStyle = '#450a0a';
+          ctx.fill();
+          ctx.strokeStyle = '#fb7185';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(midX - 3.5, midY - 3.5);
+          ctx.lineTo(midX + 3.5, midY + 3.5);
+          ctx.moveTo(midX + 3.5, midY - 3.5);
+          ctx.lineTo(midX - 3.5, midY + 3.5);
+          ctx.strokeStyle = '#fff1f2';
+          ctx.lineWidth = 2;
+          ctx.stroke();
         } else {
-          ctx.strokeStyle = '#334155';
-          ctx.lineWidth = 1.5;
-          ctx.shadowBlur = 0;
+          // Draw normal or allowed policy path.
+          ctx.beginPath();
+          ctx.moveTo(src.x, src.y);
+          ctx.lineTo(tgt.x, tgt.y);
+
+          if (isPolicyPath) {
+            ctx.strokeStyle = '#34d399';
+            ctx.lineWidth = 4;
+            ctx.setLineDash([9, 6]);
+            ctx.shadowColor = ctx.strokeStyle;
+            ctx.shadowBlur = 9;
+          } else if (isHighlighted) {
+            ctx.strokeStyle = '#22d3ee';
+            ctx.lineWidth = 2.5;
+            ctx.shadowColor = 'rgba(34, 211, 238, 0.6)';
+            ctx.shadowBlur = 8;
+          } else if (link.status === 'down') {
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 1.8;
+            ctx.shadowBlur = 0;
+          } else if (isDimmed) {
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            ctx.shadowBlur = 0;
+          } else {
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 1.5;
+            ctx.shadowBlur = 0;
+          }
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.shadowBlur = 0; // reset
         }
-        ctx.stroke();
-        ctx.shadowBlur = 0; // reset
 
         // Animate packets flowing along active link
-        if (animatingTraffic && link.status !== 'down' && !isDimmed) {
+        if (animatingTraffic && link.status !== 'down' && !isDimmed && !isDeniedPolicyPath) {
           const t = (pulseOffsetRef.current + (link.id * 0.17)) % 1;
           const px = src.x + (tgt.x - src.x) * t;
           const py = src.y + (tgt.y - src.y) * t;
@@ -307,7 +425,7 @@ export const Topology: React.FC = () => {
         }
       });
 
-      // Draw Nodes
+      // Draw Device Cards
       positions.forEach(({ x, y, device }) => {
         const isSelected = selectedDevice?.id === device.id;
         const isHovered = hoveredNode?.id === device.id;
@@ -320,47 +438,50 @@ export const Topology: React.FC = () => {
         const isDimmed = !isMatchesZone || !isMatchesSearch;
         const colors = TYPE_CONFIG[device.device_type] || TYPE_CONFIG.router;
 
-        // Selection / Hover Aura
+        const cardWidth = 150;
+        const cardHeight = 62;
+        const left = x - cardWidth / 2;
+        const top = y - cardHeight / 2;
+
         if (isSelected || isHovered) {
           ctx.beginPath();
-          ctx.arc(x, y, 26, 0, 2 * Math.PI);
-          ctx.fillStyle = isSelected ? 'rgba(34, 211, 238, 0.25)' : 'rgba(56, 189, 248, 0.15)';
+          ctx.roundRect(left - 3, top - 3, cardWidth + 6, cardHeight + 6, 13);
+          ctx.fillStyle = isSelected ? 'rgba(34, 211, 238, 0.13)' : 'rgba(56, 189, 248, 0.08)';
           ctx.fill();
           ctx.strokeStyle = isSelected ? '#22d3ee' : '#38bdf8';
-          ctx.lineWidth = isSelected ? 2.5 : 1.5;
+          ctx.lineWidth = 1.5;
           ctx.stroke();
         }
 
-        // Main Node Circle
         ctx.beginPath();
-        ctx.arc(x, y, 18, 0, 2 * Math.PI);
-        ctx.fillStyle = isDimmed ? '#1e293b' : colors.bg;
+        ctx.roundRect(left, top, cardWidth, cardHeight, 10);
+        ctx.fillStyle = isDimmed ? 'rgba(15, 23, 42, 0.94)' : 'rgba(15, 23, 42, 0.98)';
         ctx.fill();
         ctx.strokeStyle = isSelected ? '#22d3ee' : isDimmed ? '#334155' : colors.border;
-        ctx.lineWidth = isSelected ? 2.5 : 1.5;
+        ctx.lineWidth = isSelected ? 2 : 1.2;
         ctx.stroke();
 
-        // Status Indicator Dot
         ctx.beginPath();
-        ctx.arc(x + 12, y - 12, 4.5, 0, 2 * Math.PI);
-        ctx.fillStyle = device.status === 'active' ? '#10b981' : '#ef4444';
+        ctx.arc(left + 19, y, 10, 0, 2 * Math.PI);
+        ctx.fillStyle = isDimmed ? '#334155' : colors.bg;
         ctx.fill();
-        ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = isDimmed ? '#475569' : colors.border;
+        ctx.lineWidth = 1;
         ctx.stroke();
 
-        // Node Label
-        ctx.font = isSelected || isHovered ? 'bold 11px monospace' : '10px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = isSelected ? '#22d3ee' : isHovered ? '#38bdf8' : isDimmed ? '#475569' : '#f1f5f9';
-        ctx.fillText(device.name, x, y + 32);
+        ctx.beginPath();
+        ctx.arc(left + cardWidth - 11, top + 11, 3.5, 0, 2 * Math.PI);
+        ctx.fillStyle = device.status === 'active' ? '#34d399' : '#fb7185';
+        ctx.fill();
 
-        // Subnet / Zone Subtext
-        if (!isDimmed) {
-          ctx.font = '9px monospace';
-          ctx.fillStyle = '#64748b';
-          ctx.fillText(device.zone ? `[${device.zone}]` : device.ip_address, x, y + 43);
-        }
+        const displayName = device.name.length > 18 ? `${device.name.slice(0, 17)}…` : device.name;
+        ctx.textAlign = 'left';
+        ctx.font = isSelected || isHovered ? 'bold 12px monospace' : '12px monospace';
+        ctx.fillStyle = isDimmed ? '#64748b' : '#f8fafc';
+        ctx.fillText(displayName, left + 34, y - 2, 105);
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = isDimmed ? '#475569' : '#94a3b8';
+        ctx.fillText(`${device.device_type.toUpperCase()}  ·  ${device.zone || device.ip_address}`, left + 34, y + 16, 105);
       });
 
       ctx.restore();
@@ -398,8 +519,7 @@ export const Topology: React.FC = () => {
 
     // Check node hit
     for (const [id, { x, y, device }] of positionsRef.current) {
-      const dist = Math.sqrt((mx - x) ** 2 + (my - y) ** 2);
-      if (dist <= 22) {
+      if (Math.abs(mx - x) <= 72 && Math.abs(my - y) <= 32) {
         setSelectedDevice(device);
         setSelectedLink(null);
         isDraggingNodeRef.current = id;
@@ -465,8 +585,7 @@ export const Topology: React.FC = () => {
           const { x: mx, y: my } = getCanvasWorldCoords(e);
           let foundHover: Device | null = null;
           for (const [, { x, y, device }] of positionsRef.current) {
-            const dist = Math.sqrt((mx - x) ** 2 + (my - y) ** 2);
-            if (dist <= 22) {
+            if (Math.abs(mx - x) <= 72 && Math.abs(my - y) <= 32) {
               foundHover = device;
               break;
             }
@@ -513,8 +632,10 @@ export const Topology: React.FC = () => {
     }
   };
 
-  if (loading) return <LoadingSpinner message="Calculating network graph topology..." />;
-  if (error) return <ErrorMessage message={error.message} onRetry={refetch} />;
+  // Keep the existing topology and Auto-Pilot modal mounted while refreshing
+  // after an enforcement run. Replacing the whole page here hides its result.
+  if (loading && !data) return <LoadingSpinner message="Calculating network graph topology..." />;
+  if (error && !data) return <ErrorMessage message={error.message} onRetry={refetch} />;
 
   const devices = data?.devices || [];
   const links = data?.links || [];
@@ -605,6 +726,42 @@ export const Topology: React.FC = () => {
         </div>
       </div>
 
+      <div className="flex items-center gap-1 border-b border-slate-800" role="tablist" aria-label="Topology views">
+        <button type="button" role="tab" aria-selected={activeTab === 'graph'} onClick={() => setActiveTab('graph')} className={`px-4 py-2 text-xs font-semibold border-b-2 transition-colors ${activeTab === 'graph' ? 'border-cyan-400 text-cyan-300' : 'border-transparent text-slate-400 hover:text-white'}`}>
+          Network Graph
+        </button>
+        <button type="button" role="tab" aria-selected={activeTab === 'commands'} onClick={() => setActiveTab('commands')} className={`px-4 py-2 text-xs font-semibold border-b-2 transition-colors ${activeTab === 'commands' ? 'border-cyan-400 text-cyan-300' : 'border-transparent text-slate-400 hover:text-white'}`}>
+          Command Guide
+        </button>
+      </div>
+
+      {activeTab === 'commands' ? (
+        <section className="card p-5 space-y-5" role="tabpanel" aria-label="Supported topology commands">
+          <div>
+            <h2 className="text-base font-bold text-white">Natural-language enforcement commands</h2>
+            <p className="mt-1 text-sm text-slate-400">Enter these in Auto-Enforce. Use your actual device names, network names, or zones.</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {[
+              { title: 'Block or deny traffic', examples: ['Block guest network from accessing the database server.', 'Stop edge-router from reaching core-router.', 'The guest network must not communicate with the HR network.'] },
+              { title: 'Allow or require access', examples: ['Allow engineering network to access the application server.', 'All devices in the engineering network must be able to access the internal application server.', 'The app server must be reachable by engineering.'] },
+              { title: 'Limit a service', examples: ['Allow engineering network to access the app server on port 443.', 'Block guest network from reaching the database over port 5432.', 'Allow SSH from management to core-router.'] },
+              { title: 'Scope by device or subnet', examples: ['Deny 10.0.1.0/24 from 10.0.0.0/24.', 'Stop edge-router from core-router.', 'Isolate the guest network from the HR network.'] },
+            ].map((group) => (
+              <div key={group.title} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+                <h3 className="text-sm font-semibold text-cyan-300">{group.title}</h3>
+                <ul className="mt-2 space-y-2">
+                  {group.examples.map((example) => <li key={example} className="rounded-lg bg-slate-950/70 px-3 py-2 font-mono text-xs text-slate-200">“{example}”</li>)}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-100">
+            <strong className="text-amber-300">Physical links:</strong> To create one, open Auto-Pilot and enter “Connect edge-router to main-firewall directly” or “Create a link between edge-router and main-firewall.” The node names must match the topology. “Disconnect” and “stop X from Y” create a deny policy; they do not remove a physical graph link. Select <strong>Network Graph</strong> to inspect the topology.
+          </div>
+        </section>
+      ) : <>
+
       {/* Filter & Search Bar */}
       <div className="card p-3.5 flex flex-col md:flex-row justify-between items-center gap-4">
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
@@ -679,6 +836,19 @@ export const Topology: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Canvas Area */}
         <div className="lg:col-span-3 card p-4 bg-slate-950 flex flex-col items-center justify-center relative overflow-hidden min-h-[580px]">
+          {data?.active_requirements?.[0] && (
+            <div className="absolute top-6 left-6 z-10 max-w-[62%] rounded-lg border border-rose-500/40 bg-slate-950/95 px-3 py-2 shadow-lg shadow-rose-950/30">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-rose-300">
+                Active requirement · {data.active_requirements[0].policies[0]?.action || data.active_requirements[0].policies[0]?.policy_type}
+              </div>
+              <div className="mt-1 truncate text-xs font-mono text-white" title={data.active_requirements[0].natural_language}>
+                {data.active_requirements[0].natural_language}
+              </div>
+              {(data.active_requirements[0].policies[0]?.action === 'deny' || data.active_requirements[0].policies[0]?.policy_type === 'deny' || data.active_requirements[0].policies[0]?.policy_type === 'isolate') && (
+                <div className="mt-1 text-[9px] text-rose-200/80">Red break + × means traffic blocked; physical link remains.</div>
+              )}
+            </div>
+          )}
           <canvas
             ref={canvasRef}
             width={900}
@@ -853,6 +1023,8 @@ export const Topology: React.FC = () => {
           </div>
         </div>
       </div>
+
+      </>}
 
       {/* Switch / Import Topology Studio Modal */}
       <TopologyManagerModal

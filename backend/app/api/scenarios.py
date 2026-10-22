@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from typing import Dict, Any, List
-from app.database import get_db
+from app.database import Base, get_db
 from app.services.scenario_runner import ScenarioRunner
 from app.services.audit_service import AuditService
 from app.models.device import Device
@@ -73,10 +75,21 @@ def list_scenarios(db: Session = Depends(get_db)):
 
 @router.post("/{scenario_id}/run")
 def run_scenario(scenario_id: str, db: Session = Depends(get_db)):
-    runner = ScenarioRunner(db)
     scenario_id = scenario_id.upper()
+    simulation_engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    simulation_db = None
     try:
-        results = runner.run_scenario(scenario_id)
+        # ScenarioRunner builds a sample network by clearing and repopulating
+        # its session. Give it a throwaway database so a demo run cannot erase
+        # the user's live topology, policies, or verification findings.
+        Base.metadata.create_all(bind=simulation_engine)
+        SimulationSession = sessionmaker(autocommit=False, autoflush=False, bind=simulation_engine)
+        simulation_db = SimulationSession()
+        results = ScenarioRunner(simulation_db).run_scenario(scenario_id)
         AuditService.log(
             db,
             action="RUN_SCENARIO",
@@ -95,6 +108,10 @@ def run_scenario(scenario_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if simulation_db is not None:
+            simulation_db.close()
+        simulation_engine.dispose()
 
 @router.post("/reset/baseline")
 def reset_baseline_topology(db: Session = Depends(get_db)):
