@@ -33,6 +33,18 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api")
 
+@app.get("/")
+def root():
+    return {
+        "title": "AI-Driven Network Intent Verification and Automated Configuration Repair",
+        "status": "online",
+        "mode": "Simulation Engine + NLP",
+        "docs_url": "http://127.0.0.1:8000/docs",
+        "frontend_url": "http://localhost:3000",
+        "health_endpoint": "/health",
+        "api_prefix": "/api"
+    }
+
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
