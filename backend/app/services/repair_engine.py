@@ -1,5 +1,6 @@
 import json
 import copy
+import ipaddress
 from datetime import datetime
 from app.models import RepairProposal, VerificationFinding, Intent, NormalizedPolicy, Device, NetworkLink, ConfigurationVersion
 from app.services.network_graph import NetworkGraph

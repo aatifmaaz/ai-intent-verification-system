@@ -97,10 +97,9 @@ def auto_enforce_intent(intent_in: IntentCreate, db: Session = Depends(get_db)):
     from app.services.repair_engine import RepairEngine
     from app.models.verification import VerificationFinding
 
-    # 1. Parse the requested policy against the active topology.
-    parsed_result = intent_parser.parse(intent_in.natural_language, db=db)
-    if not parsed_result.get("policies"):
-        raise HTTPException(status_code=422, detail="I couldn't identify a network rule in that sentence. Specify which network or device should be allowed or blocked from which destination.")
+    parsed_result = llm_intent_parser.parse(intent_in.natural_language, db=db)
+    if not parsed_result.get("policies") or parsed_result.get("status") in ["unsupported", "needs_clarification"]:
+        raise HTTPException(status_code=422, detail=parsed_result.get("assumptions") or "I couldn't identify a network rule in that sentence. Specify which network or device should be allowed or blocked from which destination.")
 
     created_policies = []
     policy_specs = []

@@ -495,7 +495,7 @@ export const Topology: React.FC = () => {
       isRunning = false;
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [data, selectedDevice, selectedLink, hoveredNode, zoneFilter, searchQuery, animatingTraffic, pan, zoom]);
+  }, [data, selectedDevice, selectedLink, hoveredNode, zoneFilter, searchQuery, animatingTraffic, pan, zoom, layoutMode]);
 
   // Convert Mouse Event screen coordinates accurately to World Coordinates
   const getCanvasWorldCoords = useCallback((e: React.MouseEvent<HTMLCanvasElement> | MouseEvent) => {
