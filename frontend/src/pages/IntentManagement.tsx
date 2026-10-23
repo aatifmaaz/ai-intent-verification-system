@@ -445,8 +445,27 @@ export const IntentManagement: React.FC = () => {
                         {isExpanded ? <ChevronDown className="w-4 h-4 text-cyan-400 flex-shrink-0" /> : <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0" />}
                         <div className="min-w-0">
                           <div className="text-sm font-semibold text-white truncate">"{intent.natural_language}"</div>
-                          <div className="text-xs text-slate-500 font-mono mt-0.5">
-                            Status: <span className="text-cyan-400 uppercase">{intent.status}</span> &middot; Confidence: {Math.round((intent.confidence || 1) * 100)}%
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-mono mt-1">
+                            <span>Status: <span className="text-cyan-400 uppercase">{intent.status}</span></span>
+                            <span>&middot;</span>
+                            <span>Confidence: {Math.round((intent.confidence || 1) * 100)}%</span>
+                            <span>&middot;</span>
+                            <span className="flex items-center gap-1">
+                              <span>Parser:</span>
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                (intent.interpreter || intent.parser_provenance)?.includes('openai')
+                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                                  : (intent.interpreter || intent.parser_provenance)?.includes('fallback')
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                  : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                              }`}>
+                                {(intent.interpreter || intent.parser_provenance)?.includes('openai')
+                                  ? 'OpenAI LLM'
+                                  : (intent.interpreter || intent.parser_provenance)?.includes('fallback')
+                                  ? 'Deterministic Fallback'
+                                  : 'Deterministic Rule Engine'}
+                              </span>
+                            </span>
                           </div>
                         </div>
                       </div>

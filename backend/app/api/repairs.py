@@ -68,17 +68,36 @@ def validate_repair(req: ValidateRequest, db: Session = Depends(get_db)):
 
 @router.post("/{repair_id}/approve")
 def approve_repair(repair_id: int, db: Session = Depends(get_db)):
+    proposal = db.query(RepairProposal).filter(RepairProposal.id == repair_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Repair proposal not found")
+
+    if proposal.applied_at or proposal.approval_status == "approved":
+        raise HTTPException(status_code=400, detail="Repair proposal has already been applied")
+
+    if proposal.validation_status != "valid":
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot apply repair: proposal has not passed sandbox validation (current status: '{proposal.validation_status}'). Please run sandbox validation first."
+        )
+
     engine = RepairEngine(db)
     try:
         success = engine.apply_repair(repair_id)
         if not success:
-            raise HTTPException(status_code=404, detail="Repair proposal not found")
+            db.refresh(proposal)
+            if proposal.validation_status == "stale":
+                raise HTTPException(status_code=400, detail="Cannot apply repair: target device configuration has changed since proposal generation (stale proposal)")
+            raise HTTPException(status_code=400, detail="Cannot apply repair proposal: validation or application check failed")
+
         AuditService.log(db, action="APPROVE_REPAIR", entity_type="RepairProposal", entity_id=repair_id, details="Repair applied to simulated device")
         repair = db.query(RepairProposal).filter(RepairProposal.id == repair_id).first()
         return {
             "message": "Repair approved and applied successfully",
             "repair": _serialize_repair(repair)
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

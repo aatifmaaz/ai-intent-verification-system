@@ -69,3 +69,80 @@ def test_update_intent_reparses_policy(client, db_session):
     assert policy.destination_zone == "application"
 
 
+def test_intent_provenance_deterministic(client):
+    """Test that intent endpoints expose interpreter and parser_provenance safely."""
+    resp = client.post("/api/intents/", json={
+        "natural_language": "Guest users must not communicate with HR"
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert "interpreter" in data
+    assert "parser_provenance" in data
+    assert data["interpreter"] in ["deterministic", "deterministic_fallback"]
+    assert data["parser_provenance"] == data["interpreter"]
+    # Ensure no secrets or API keys are leaked
+    assert "sk-" not in str(data)
+
+
+def test_intent_provenance_mocked_llm(client):
+    """Test that mocked OpenAI parsing preserves and exposes OpenAI interpreter provenance."""
+    from unittest.mock import MagicMock, patch
+    from app.config import Settings
+
+    with patch("app.services.llm_parser.settings", Settings(openai_api_key="sk-mocked-test-key", openai_model="gpt-4o-mini")):
+        mock_openai_module = MagicMock()
+        mock_client = MagicMock()
+        mock_openai_module.OpenAI.return_value = mock_client
+        mock_choice = MagicMock()
+        mock_choice.message.content = """{
+            "status": "parsed",
+            "confidence": 0.98,
+            "assumptions": "Verified via LLM",
+            "policies": [{
+                "policy_type": "allow",
+                "action": "permit",
+                "source_zone": "finance",
+                "destination_zone": "payroll",
+                "protocol": "tcp",
+                "port": "443"
+            }]
+        }"""
+        mock_completion = MagicMock(choices=[mock_choice])
+        mock_client.chat.completions.create.return_value = mock_completion
+
+        with patch.dict("sys.modules", {"openai": mock_openai_module}):
+            resp = client.post("/api/intents/", json={
+                "natural_language": "Allow Finance to access Payroll on port 443"
+            })
+            assert resp.status_code == 201
+            data = resp.json()
+            assert data["interpreter"] == "openai-gpt-4o-mini"
+            assert data["parser_provenance"] == "openai-gpt-4o-mini"
+            assert "sk-" not in str(data)
+
+
+def test_approve_repair_rejects_unvalidated_proposal(client, db_session):
+    """Test that the API rejects approval of an unvalidated proposal with HTTP 400."""
+    from app.services.verification_engine import VerificationEngine
+    from app.services.repair_engine import RepairEngine
+    from app.models.verification import VerificationFinding
+
+    v_engine = VerificationEngine(db_session)
+    run = v_engine.verify()
+    finding = db_session.query(VerificationFinding).filter(
+        VerificationFinding.run_id == run.id,
+        VerificationFinding.status == "FAIL"
+    ).first()
+
+    r_engine = RepairEngine(db_session)
+    proposal = r_engine.propose_repair(finding.id)
+    assert proposal is not None
+    assert proposal.validation_status == "pending"
+
+    # Try approving without sandbox validation
+    resp = client.post(f"/api/repairs/{proposal.id}/approve")
+    assert resp.status_code == 400
+    assert "sandbox validation" in resp.json()["detail"].lower()
+
+
+

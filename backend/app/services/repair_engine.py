@@ -210,6 +210,12 @@ class RepairEngine:
             self.db.commit()
             return {"valid": False, "error": "Repair target or policy no longer exists"}
 
+        # Stale check: verify target device config hasn't drifted since proposal generation
+        if proposal.original_config and target_device.config != proposal.original_config:
+            proposal.validation_status = "stale"
+            self.db.commit()
+            return {"valid": False, "error": f"Device {target_device.name} configuration has changed since proposal was generated (proposal is stale)"}
+
         devices = self.db.query(Device).all()
         links = self.db.query(NetworkLink).all()
         before_graph = NetworkGraph(devices, links)
@@ -260,11 +266,18 @@ class RepairEngine:
         if proposal.applied_at or proposal.approval_status == "approved":
             return False
 
-        # Safety check: Validate repair first if not validated
+        # Safety check: Must have passed sandbox validation first
         if proposal.validation_status != "valid":
-            val_result = self.validate_repair(repair_id)
-            if not val_result.get("valid"):
-                return False
+            return False
+
+        # Safety check: Reject stale proposal if device config changed since generation
+        for dev_name in (proposal.affected_devices or []):
+            dev = self.db.query(Device).filter(Device.name == dev_name).first()
+            if dev and proposal.original_config:
+                if dev.config != proposal.original_config:
+                    proposal.validation_status = "stale"
+                    self.db.commit()
+                    return False
 
         for dev_name in (proposal.affected_devices or []):
             dev = self.db.query(Device).filter(Device.name == dev_name).first()

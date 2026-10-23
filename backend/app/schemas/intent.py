@@ -29,6 +29,8 @@ class IntentResponse(IntentBase):
     status: str
     confidence: Optional[float] = None
     assumptions: Optional[Dict[str, Any]] = None
+    interpreter: Optional[str] = "deterministic"
+    parser_provenance: Optional[str] = "deterministic"
     created_at: datetime
     updated_at: datetime
     policies: List[NormalizedPolicyResponse] = []

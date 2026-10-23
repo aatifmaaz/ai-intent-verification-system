@@ -81,7 +81,7 @@ export const VerificationCenter = () => {
             Verification Center
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Real-time graph reachability and formal ACL security policy audit.
+            Deterministic graph reachability and formal ACL security policy audit on simulated topology.
           </p>
         </div>
 

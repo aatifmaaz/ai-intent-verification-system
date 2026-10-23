@@ -35,12 +35,15 @@ export const Dashboard = () => {
 
   const PIE_COLORS = ['#10b981', '#ef4444', '#f59e0b', '#3b82f6'];
 
-  // Build trend data from verification history
-  const trendData = (history?.runs || []).slice(-10).map((run: { id: number; started_at: string; passed: number; failed: number; unknown: number }) => ({
-    name: new Date(run.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    pass: run.passed,
-    fail: run.failed,
-  }));
+  // Build trend data from verification history (latest 10 runs in chronological order)
+  const trendData = (history?.runs || [])
+    .slice(0, 10)
+    .reverse()
+    .map((run: { id: number; started_at: string; passed: number; failed: number; unknown: number }) => ({
+      name: `${new Date(run.started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${new Date(run.started_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`,
+      pass: run.passed,
+      fail: run.failed,
+    }));
 
   // Build violations pie data from stats
   const violationsPie = stats ? [
@@ -51,7 +54,7 @@ export const Dashboard = () => {
 
   return (
     <div className="space-y-6">
-      {/* AUTONOMOUS AI AUTO-PILOT HERO SECTION */}
+      {/* SIMULATED NETWORK VERIFICATION STUDIO HERO SECTION */}
       <div className="card p-6 bg-gradient-to-r from-slate-900 via-cyan-950/30 to-slate-900 border-cyan-500/40 shadow-2xl relative overflow-hidden">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 pb-4 border-b border-slate-800">
           <div className="flex items-center gap-3">
@@ -61,14 +64,14 @@ export const Dashboard = () => {
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold text-white tracking-wide">
-                  Autonomous Network Auto-Pilot
+                  Automated Network Verification Studio
                 </h2>
                 <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                  Closed-Loop 100% Automated
+                  Closed-Loop Simulated Verification
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Give any requirement in plain English. The AI parses the rule, audits reachability, isolates violations, validates in a sandbox, generates minimal ACL patches, deploys to hardware, and re-verifies 100% compliance automatically.
+                Define network requirements in natural language. The system translates intents into formal policies, verifies network graph reachability, isolates violations, validates patches in a sandbox, and applies changes to simulated device configurations with rollback support.
               </p>
             </div>
           </div>

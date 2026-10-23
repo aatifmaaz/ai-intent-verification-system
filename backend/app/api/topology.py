@@ -127,7 +127,12 @@ def delete_link(link_id: int, db: Session = Depends(get_db)):
 @router.get("/dashboard/stats")
 def dashboard_stats(db: Session = Depends(get_db)):
     total_devices = db.query(Device).count()
-    total_policies = db.query(NormalizedPolicy).count()
+    total_policies = (
+        db.query(NormalizedPolicy)
+        .join(Intent, Intent.id == NormalizedPolicy.intent_id)
+        .filter((Intent.status.is_(None)) | (Intent.status != "archived"))
+        .count()
+    )
     
     latest_run = db.query(VerificationRun).order_by(VerificationRun.started_at.desc()).first()
     passed = 0

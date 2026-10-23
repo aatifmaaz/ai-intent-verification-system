@@ -64,7 +64,9 @@ export interface Intent {
   natural_language: string;
   status: 'draft' | 'parsed' | 'active' | 'archived';
   confidence: number | null;
-  assumptions: Record<string, unknown> | null;
+  assumptions: Record<string, unknown> | string | null;
+  interpreter?: string | null;
+  parser_provenance?: string | null;
   created_at: string;
   updated_at: string;
   policies: NormalizedPolicy[];

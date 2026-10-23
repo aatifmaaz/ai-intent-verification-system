@@ -513,7 +513,7 @@ export const Configurations: React.FC = () => {
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-slate-800">
                     <div>
                       <h3 className="text-sm font-semibold text-white">Configuration Importer & Live Validator</h3>
-                      <p className="text-xs text-slate-400">Validate syntactical compliance before committing to simulated hardware</p>
+                      <p className="text-xs text-slate-400">Validate syntactical compliance before committing to simulated device configuration</p>
                     </div>
 
                     {/* Presets */}

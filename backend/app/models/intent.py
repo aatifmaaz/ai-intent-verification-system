@@ -9,6 +9,7 @@ class Intent(Base):
     status = Column(String, default="draft") # draft/parsed/active/archived
     confidence = Column(Float)
     assumptions = Column(JSON, nullable=True)
+    interpreter = Column(String, default="deterministic", nullable=True)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 

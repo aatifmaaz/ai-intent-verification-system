@@ -37,12 +37,25 @@ def serialize_policy(p: NormalizedPolicy) -> dict:
     }
 
 def serialize_intent(intent: Intent, policies: List[NormalizedPolicy]) -> dict:
+    interpreter = getattr(intent, 'interpreter', None)
+    if not interpreter:
+        if isinstance(intent.assumptions, dict) and 'interpreter' in intent.assumptions:
+            interpreter = intent.assumptions.get('interpreter')
+        elif isinstance(intent.assumptions, str) and 'openai' in intent.assumptions.lower():
+            interpreter = "openai-gpt-4o-mini"
+        elif isinstance(intent.assumptions, str) and 'fallback' in intent.assumptions.lower():
+            interpreter = "deterministic_fallback"
+        else:
+            interpreter = "deterministic"
+
     return {
         "id": intent.id,
         "natural_language": intent.natural_language,
         "status": intent.status,
         "confidence": intent.confidence,
         "assumptions": intent.assumptions,
+        "interpreter": interpreter,
+        "parser_provenance": interpreter,
         "created_at": intent.created_at.isoformat() if intent.created_at else None,
         "updated_at": intent.updated_at.isoformat() if intent.updated_at else None,
         "policies": [serialize_policy(p) for p in policies]
@@ -57,12 +70,13 @@ def create_intent(intent_in: IntentCreate, db: Session = Depends(get_db)):
     if not parsed_result.get("policies") or parsed_result.get("status") in ["unsupported", "needs_clarification"]:
         raise HTTPException(status_code=422, detail=parsed_result.get("assumptions") or "I couldn't identify a valid network rule in that sentence. Specify source and destination zones or networks.")
 
-    
+    interpreter = parsed_result.get("interpreter") or "deterministic"
     new_intent = Intent(
         natural_language=intent_in.natural_language,
         status="parsed",
         confidence=parsed_result.get("confidence", 1.0),
-        assumptions=parsed_result.get("assumptions")
+        assumptions=parsed_result.get("assumptions"),
+        interpreter=interpreter
     )
 
     db.add(new_intent)
@@ -129,7 +143,8 @@ def auto_enforce_intent(intent_in: IntentCreate, db: Session = Depends(get_db)):
             natural_language=intent_in.natural_language,
             status="parsed",
             confidence=parsed_result.get("confidence", 1.0),
-            assumptions=parsed_result.get("assumptions")
+            assumptions=parsed_result.get("assumptions"),
+            interpreter=parsed_result.get("interpreter") or "deterministic"
         )
         db.add(new_intent)
         db.commit()
@@ -277,12 +292,12 @@ def auto_enforce_intent(intent_in: IntentCreate, db: Session = Depends(get_db)):
         "detail": val_result.get("message", "The isolated policy validation passed.")
     })
 
-    # 6. Autonomous Deployment
+    # 6. Simulated Deployment
     if not r_engine.apply_repair(proposal.id):
-        steps.append({"step": 5, "status": "failed", "title": "Autonomous Hardware Deployment", "detail": "The ACL patch could not be applied to the target device."})
+        steps.append({"step": 5, "status": "failed", "title": "Simulated Configuration Application", "detail": "The ACL patch could not be applied to the target device configuration."})
         return {
             "status": "FAIL",
-            "intent": {"id": new_intent.id, "natural_language": new_intent.natural_language},
+            "intent": {"id": new_intent.id, "natural_language": new_intent.natural_language, "interpreter": new_intent.interpreter, "parser_provenance": new_intent.interpreter},
             "policies": [{"id": p.id, "type": p.policy_type, "source": p.source_zone, "source_network": p.source_network, "dest": p.destination_zone, "destination_network": p.destination_network} for p in created_policies],
             "repair": {"id": proposal.id, "description": proposal.description, "affected_devices": proposal.affected_devices, "original_config": proposal.original_config, "proposed_config": proposal.proposed_config, "change_type": proposal.change_type},
             "remediation_applied": False,
@@ -293,7 +308,7 @@ def auto_enforce_intent(intent_in: IntentCreate, db: Session = Depends(get_db)):
     steps.append({
         "step": 5,
         "status": "completed",
-        "title": "Autonomous Hardware Deployment",
+        "title": "Simulated Configuration Application",
         "detail": f"Injected patch into device configuration and recorded new version in ledger."
     })
 

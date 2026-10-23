@@ -52,7 +52,7 @@ export const Repairs: React.FC = () => {
     setFeedbackMessage(null);
     try {
       await approveRepair(id);
-      setFeedbackMessage({ type: 'success', text: `Proposal #${id} approved and applied to simulated hardware!` });
+      setFeedbackMessage({ type: 'success', text: `Proposal #${id} approved and applied to simulated device configuration!` });
       refetch();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Approval failed';
@@ -344,15 +344,20 @@ export const Repairs: React.FC = () => {
                       {inProgress ? 'Validating...' : 'Validate In Sandbox'}
                     </button>
 
-                    {/* Approve & Apply Button */}
+                    {/* Approve & Apply Button - Enforce validation before application */}
                     {isPending && (
                       <button
                         onClick={() => handleApprove(proposal.id)}
-                        disabled={inProgress}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-lg shadow-emerald-600/20 transition-all disabled:opacity-50"
+                        disabled={inProgress || !isValidated}
+                        title={!isValidated ? 'Proposal must pass sandbox validation before applying' : 'Apply patch to simulated device configuration'}
+                        className={`flex items-center gap-1.5 px-4 py-2 text-white text-xs font-semibold rounded-lg shadow-lg transition-all ${
+                          !isValidated
+                            ? 'bg-slate-700/80 text-slate-400 cursor-not-allowed border border-slate-600/50 shadow-none'
+                            : 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20'
+                        } disabled:opacity-60`}
                       >
                         <CheckCircle className="w-4 h-4" />
-                        {inProgress ? 'Applying...' : 'Approve & Apply Patch'}
+                        {inProgress ? 'Applying...' : !isValidated ? 'Validate in Sandbox First' : 'Approve & Apply Patch'}
                       </button>
                     )}
 

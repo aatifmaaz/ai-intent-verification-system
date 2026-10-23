@@ -167,3 +167,57 @@ def test_regression_detection_rejects_breaking_repair(db_session):
     assert proposal.validation_status == "invalid"
     assert r_engine.apply_repair(proposal.id) is False
 
+
+def test_apply_before_validation_rejected(db_session):
+    """Test that apply_repair rejects unvalidated proposals."""
+    v_engine = VerificationEngine(db_session)
+    run1 = v_engine.verify()
+    fail_finding = db_session.query(VerificationFinding).filter(
+        VerificationFinding.run_id == run1.id,
+        VerificationFinding.status == "FAIL"
+    ).first()
+
+    r_engine = RepairEngine(db_session)
+    proposal = r_engine.propose_repair(fail_finding.id)
+    assert proposal is not None
+    assert proposal.validation_status == "pending"
+
+    # Must be rejected because it hasn't passed sandbox validation
+    assert r_engine.apply_repair(proposal.id) is False
+    assert proposal.applied_at is None
+    assert proposal.approval_status == "pending"
+
+
+def test_stale_proposal_rejected(db_session):
+    """Test that a proposal is marked stale and rejected if device config changes before apply."""
+    from app.models.device import Device
+    v_engine = VerificationEngine(db_session)
+    run1 = v_engine.verify()
+    fail_finding = db_session.query(VerificationFinding).filter(
+        VerificationFinding.run_id == run1.id,
+        VerificationFinding.status == "FAIL"
+    ).first()
+
+    r_engine = RepairEngine(db_session)
+    proposal = r_engine.propose_repair(fail_finding.id)
+    assert proposal is not None
+
+    # First validate it so it becomes valid
+    val = r_engine.validate_repair(proposal.id)
+    assert val["valid"] is True
+    assert proposal.validation_status == "valid"
+
+    # Now simulate an external drift on the target device
+    target_dev = db_session.query(Device).filter(Device.name == proposal.affected_devices[0]).first()
+    target_dev.config = {"modified": "drifted_config"}
+    db_session.commit()
+
+    # Re-validating should detect staleness
+    stale_val = r_engine.validate_repair(proposal.id)
+    assert stale_val["valid"] is False
+    assert proposal.validation_status == "stale"
+
+    # Applying must be rejected
+    assert r_engine.apply_repair(proposal.id) is False
+
+
