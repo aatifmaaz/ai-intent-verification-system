@@ -69,7 +69,40 @@ class RepairEngine:
         src_net = src_net or "any"
         dst_net = dst_net or "any"
 
-        if ptype in ['deny', 'isolate']:
+        # Check if the failure was specifically caused by a missing route
+        is_missing_route = False
+        path_evals = (finding.evidence or {}).get('path_evaluations', [])
+        for pe in path_evals:
+            for hop in pe.get('hops', []):
+                if "Missing route" in str(hop.get('reason', '')):
+                    is_missing_route = True
+                    break
+
+        if is_missing_route:
+            change_type = 'route_add'
+            desc = f"Add missing static route to {policy.destination_zone or dst_net} on {target_device.name}"
+            expected = f"Route to {dst_net} will be installed"
+            
+            dest_dev = self.db.query(Device).filter(Device.zone == policy.destination_zone).first()
+            raw_dest = (dest_dev.subnet if dest_dev else None) or (dest_dev.ip_address if dest_dev else None) or dst_net
+            if raw_dest and '/' in raw_dest:
+                try:
+                    net_obj = ipaddress.ip_network(raw_dest, strict=False)
+                    route_net = str(net_obj.network_address)
+                    route_mask = str(net_obj.netmask)
+                except ValueError:
+                    route_net = raw_dest.split('/')[0]
+                    route_mask = "255.255.255.0"
+            else:
+                route_net = raw_dest if raw_dest and raw_dest != "any" else "10.1.6.0"
+                route_mask = "255.255.255.0"
+
+            proposed_config.setdefault('routes', []).append({
+                "network": route_net,
+                "mask": route_mask,
+                "next_hop": "10.0.3.2"
+            })
+        elif ptype in ['deny', 'isolate']:
             change_type = 'acl_add'
             desc = f"Add deny rule to block {policy.source_zone or src_net} to {policy.destination_zone or dst_net}"
             expected = f"Traffic from {src_net} to {dst_net} will be blocked"
@@ -119,6 +152,13 @@ class RepairEngine:
         self.db.add(proposal)
         self.db.commit()
         self.db.refresh(proposal)
+
+        try:
+            from app.services.audit_service import AuditService
+            AuditService.log(self.db, action="PROPOSE_REPAIR", entity_type="RepairProposal", entity_id=proposal.id, details=proposal.description)
+        except Exception:
+            pass
+
         return proposal
 
     def validate_repair(self, repair_id):
@@ -126,29 +166,39 @@ class RepairEngine:
         if not proposal:
             return {"valid": False, "error": "Proposal not found"}
             
-        # Validate ACL shape and rule values before evaluating the proposed
-        # configuration against an isolated copy of the live graph.
+        # Validate configuration structure
         proposed = proposal.proposed_config or {}
-        if not isinstance(proposed, dict) or 'acls' not in proposed:
+        if not isinstance(proposed, dict):
             proposal.validation_status = "invalid"
             self.db.commit()
-            return {"valid": False, "error": "Invalid configuration structure"}
+            return {"valid": False, "error": "Invalid configuration structure: must be an object"}
 
-        if not isinstance(proposed['acls'], list):
-            proposal.validation_status = "invalid"
-            self.db.commit()
-            return {"valid": False, "error": "ACL collection must be a list"}
-
-        for acl in proposed['acls']:
-            if not isinstance(acl, dict) or not isinstance(acl.get('rules'), list):
+        if 'acls' in proposed:
+            if not isinstance(proposed['acls'], list):
                 proposal.validation_status = "invalid"
                 self.db.commit()
-                return {"valid": False, "error": "Each ACL must contain a rule list"}
-            for rule in acl['rules']:
-                if not isinstance(rule, dict) or rule.get('action') not in {'permit', 'deny'}:
+                return {"valid": False, "error": "ACL collection must be a list"}
+            for acl in proposed['acls']:
+                if not isinstance(acl, dict) or not isinstance(acl.get('rules'), list):
                     proposal.validation_status = "invalid"
                     self.db.commit()
-                    return {"valid": False, "error": "ACL rules must have a permit or deny action"}
+                    return {"valid": False, "error": "Each ACL must contain a rule list"}
+                for rule in acl['rules']:
+                    if not isinstance(rule, dict) or rule.get('action') not in {'permit', 'deny'}:
+                        proposal.validation_status = "invalid"
+                        self.db.commit()
+                        return {"valid": False, "error": "ACL rules must have a permit or deny action"}
+
+        if 'routes' in proposed:
+            if not isinstance(proposed['routes'], list):
+                proposal.validation_status = "invalid"
+                self.db.commit()
+                return {"valid": False, "error": "Routes collection must be a list"}
+            for r in proposed['routes']:
+                if not isinstance(r, dict) or 'network' not in r:
+                    proposal.validation_status = "invalid"
+                    self.db.commit()
+                    return {"valid": False, "error": "Each route must be an object with network"}
 
         target_policy = self.db.query(NormalizedPolicy).filter_by(id=proposal.policy_id).first()
         target_device_name = (proposal.affected_devices or [None])[0]
@@ -204,6 +254,16 @@ class RepairEngine:
         if not proposal:
             return False
             
+        # Safety check: Cannot apply an already applied repair
+        if proposal.applied_at or proposal.approval_status == "approved":
+            return False
+
+        # Safety check: Validate repair first if not validated
+        if proposal.validation_status != "valid":
+            val_result = self.validate_repair(repair_id)
+            if not val_result.get("valid"):
+                return False
+
         for dev_name in (proposal.affected_devices or []):
             dev = self.db.query(Device).filter(Device.name == dev_name).first()
             if dev:
@@ -223,20 +283,43 @@ class RepairEngine:
         proposal.approved_at = datetime.utcnow()
         proposal.applied_at = datetime.utcnow()
         self.db.commit()
+
+        try:
+            from app.services.audit_service import AuditService
+            AuditService.log(self.db, action="APPLY_REPAIR", entity_type="RepairProposal", entity_id=proposal.id, details={"change_type": proposal.change_type, "devices": proposal.affected_devices})
+        except Exception:
+            pass
+
         return True
 
     def rollback_repair(self, repair_id):
         proposal = self.db.query(RepairProposal).filter(RepairProposal.id == repair_id).first()
-        if not proposal or not proposal.applied_at:
+        if not proposal or not proposal.applied_at or proposal.rolled_back_at:
             return False
             
         for dev_name in (proposal.affected_devices or []):
             dev = self.db.query(Device).filter(Device.name == dev_name).first()
             if dev:
+                version_count = self.db.query(ConfigurationVersion).filter(ConfigurationVersion.device_id == dev.id).count()
+                version = ConfigurationVersion(
+                    device_id=dev.id,
+                    version_number=version_count + 1,
+                    config_data=dev.config,
+                    change_description=f"Rollback of proposal {proposal.id}: {proposal.description}",
+                    created_at=datetime.utcnow()
+                )
+                self.db.add(version)
                 dev.config = proposal.original_config
                 
         proposal.approval_status = "rolled_back"
         proposal.rolled_back_at = datetime.utcnow()
         self.db.commit()
+
+        try:
+            from app.services.audit_service import AuditService
+            AuditService.log(self.db, action="ROLLBACK_REPAIR", entity_type="RepairProposal", entity_id=proposal.id, details={"devices": proposal.affected_devices})
+        except Exception:
+            pass
+
         return True
 

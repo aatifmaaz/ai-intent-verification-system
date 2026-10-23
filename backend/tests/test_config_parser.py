@@ -58,5 +58,81 @@ def test_parse_cisco_ios_configuration():
 
 def test_unsupported_format_raises_error():
     parser = ConfigParser()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Unsupported format"):
         parser.parse("some content", "unknown_format")
+
+def test_empty_configuration_raises_error():
+    parser = ConfigParser()
+    with pytest.raises(ValueError, match="cannot be empty"):
+        parser.parse("", "json")
+    with pytest.raises(ValueError, match="cannot be empty"):
+        parser.parse("   ", "yaml")
+
+def test_malformed_json_raises_error():
+    parser = ConfigParser()
+    with pytest.raises(ValueError, match="Invalid JSON"):
+        parser.parse("{hostname: missing_quotes}", "json")
+
+def test_json_non_dict_raises_error():
+    parser = ConfigParser()
+    with pytest.raises(ValueError, match="top-level must be an object"):
+        parser.parse('["item1", "item2"]', "json")
+
+def test_malformed_yaml_raises_error():
+    parser = ConfigParser()
+    with pytest.raises(ValueError, match="Invalid YAML"):
+        parser.parse("hostname: [unclosed list", "yaml")
+
+def test_yaml_non_dict_raises_error():
+    parser = ConfigParser()
+    with pytest.raises(ValueError, match="top-level must be a key-value mapping"):
+        parser.parse("- item1\n- item2", "yaml")
+
+def test_invalid_ip_in_acl_raises_error():
+    parser = ConfigParser()
+    bad_json = '''
+    {
+        "hostname": "router-1",
+        "acls": [{"name": "bad-acl", "rules": [{"action": "permit", "protocol": "ip", "source": "999.999.999.999", "destination": "any"}]}]
+    }
+    '''
+    with pytest.raises(ValueError, match="Invalid source IP/CIDR"):
+        parser.parse(bad_json, "json")
+
+def test_invalid_port_range_raises_error():
+    parser = ConfigParser()
+    bad_json = '''
+    {
+        "hostname": "router-1",
+        "acls": [{"name": "bad-acl", "rules": [{"action": "permit", "protocol": "tcp", "source": "any", "destination": "any", "port": 99999}]}]
+    }
+    '''
+    with pytest.raises(ValueError, match="Invalid port number"):
+        parser.parse(bad_json, "json")
+
+def test_ios_unsupported_commands_captured():
+    parser = ConfigParser()
+    ios_cfg = '''
+    hostname test-switch
+    !
+    spanning-tree mode rapid-pvst
+    spanning-tree portfast default
+    !
+    interface GigabitEthernet0/1
+     ip address 10.0.0.1 255.255.255.0
+    '''
+    result = parser.parse(ios_cfg, "ios")
+    assert result["hostname"] == "test-switch"
+    assert len(result["unsupported_commands"]) >= 2
+    cmd_texts = [cmd["command"] for cmd in result["unsupported_commands"]]
+    assert any("spanning-tree" in c for c in cmd_texts)
+
+def test_validate_method():
+    parser = ConfigParser()
+    errors = parser.validate("")
+    assert len(errors) > 0
+    assert "Empty" in errors[0]["error"]
+
+    valid_errors = parser.validate('{"hostname": "router-ok"}', "json")
+    assert len(valid_errors) == 0
+

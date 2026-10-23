@@ -6,10 +6,13 @@ from datetime import datetime
 from app.database import get_db
 from app.models.intent import Intent, NormalizedPolicy
 from app.services.intent_parser import IntentParser
+from app.services.llm_parser import LLMIntentParser
 from app.services.audit_service import AuditService
 
 router = APIRouter()
 intent_parser = IntentParser()
+llm_intent_parser = LLMIntentParser(deterministic_parser=intent_parser)
+
 
 class IntentCreate(BaseModel):
     natural_language: str
@@ -17,11 +20,43 @@ class IntentCreate(BaseModel):
 class IntentUpdate(BaseModel):
     natural_language: str
 
+def serialize_policy(p: NormalizedPolicy) -> dict:
+    return {
+        "id": p.id,
+        "intent_id": p.intent_id,
+        "policy_type": p.policy_type,
+        "source_zone": p.source_zone,
+        "source_network": p.source_network,
+        "destination_zone": p.destination_zone,
+        "destination_network": p.destination_network,
+        "protocol": p.protocol,
+        "port": p.port,
+        "action": p.action,
+        "priority": p.priority or 100,
+        "conditions": p.conditions
+    }
+
+def serialize_intent(intent: Intent, policies: List[NormalizedPolicy]) -> dict:
+    return {
+        "id": intent.id,
+        "natural_language": intent.natural_language,
+        "status": intent.status,
+        "confidence": intent.confidence,
+        "assumptions": intent.assumptions,
+        "created_at": intent.created_at.isoformat() if intent.created_at else None,
+        "updated_at": intent.updated_at.isoformat() if intent.updated_at else None,
+        "policies": [serialize_policy(p) for p in policies]
+    }
+
 @router.post("/", status_code=status.HTTP_201_CREATED)
 def create_intent(intent_in: IntentCreate, db: Session = Depends(get_db)):
-    parsed_result = intent_parser.parse(intent_in.natural_language, db=db)
-    if not parsed_result.get("policies"):
-        raise HTTPException(status_code=422, detail="I couldn't identify a network rule in that sentence. Specify which network or device should be allowed or blocked from which destination.")
+    if not intent_in.natural_language or not intent_in.natural_language.strip():
+        raise HTTPException(status_code=422, detail="Natural language requirement cannot be empty.")
+
+    parsed_result = llm_intent_parser.parse(intent_in.natural_language, db=db)
+    if not parsed_result.get("policies") or parsed_result.get("status") in ["unsupported", "needs_clarification"]:
+        raise HTTPException(status_code=422, detail=parsed_result.get("assumptions") or "I couldn't identify a valid network rule in that sentence. Specify source and destination zones or networks.")
+
     
     new_intent = Intent(
         natural_language=intent_in.natural_language,
@@ -54,26 +89,7 @@ def create_intent(intent_in: IntentCreate, db: Session = Depends(get_db)):
     
     AuditService.log(db, action="CREATE_INTENT", entity_type="Intent", entity_id=new_intent.id, details="Intent created and parsed")
     
-    response = {
-        "id": new_intent.id,
-        "natural_language": new_intent.natural_language,
-        "status": new_intent.status,
-        "confidence": new_intent.confidence,
-        "assumptions": new_intent.assumptions,
-        "created_at": new_intent.created_at,
-        "updated_at": new_intent.updated_at,
-        "policies": [
-            {
-                "id": p.id,
-                "intent_id": p.intent_id,
-                "policy_type": p.policy_type,
-                "source_zone": p.source_zone,
-                "destination_zone": p.destination_zone,
-                "action": p.action
-            } for p in policies
-        ]
-    }
-    return response
+    return serialize_intent(new_intent, policies)
 
 @router.post("/auto-enforce")
 def auto_enforce_intent(intent_in: IntentCreate, db: Session = Depends(get_db)):
@@ -344,17 +360,7 @@ def list_intents(db: Session = Depends(get_db)):
     results = []
     for intent in intents:
         policies = db.query(NormalizedPolicy).filter(NormalizedPolicy.intent_id == intent.id).all()
-        intent_dict = {
-            "id": intent.id,
-            "natural_language": intent.natural_language,
-            "status": intent.status,
-            "confidence": intent.confidence,
-            "assumptions": intent.assumptions,
-            "created_at": intent.created_at,
-            "updated_at": intent.updated_at,
-            "policies": [{"id": p.id, "intent_id": p.intent_id, "policy_type": p.policy_type} for p in policies]
-        }
-        results.append(intent_dict)
+        results.append(serialize_intent(intent, policies))
     return results
 
 @router.get("/{intent_id}")
@@ -364,16 +370,7 @@ def get_intent(intent_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Intent not found")
     
     policies = db.query(NormalizedPolicy).filter(NormalizedPolicy.intent_id == intent.id).all()
-    return {
-        "id": intent.id,
-        "natural_language": intent.natural_language,
-        "status": intent.status,
-        "confidence": intent.confidence,
-        "assumptions": intent.assumptions,
-        "created_at": intent.created_at,
-        "updated_at": intent.updated_at,
-        "policies": [{"id": p.id, "intent_id": p.intent_id, "policy_type": p.policy_type} for p in policies]
-    }
+    return serialize_intent(intent, policies)
 
 @router.put("/{intent_id}")
 def update_intent(intent_id: int, intent_in: IntentUpdate, db: Session = Depends(get_db)):
@@ -381,6 +378,9 @@ def update_intent(intent_id: int, intent_in: IntentUpdate, db: Session = Depends
     if not intent:
         raise HTTPException(status_code=404, detail="Intent not found")
     
+    if not intent_in.natural_language or not intent_in.natural_language.strip():
+        raise HTTPException(status_code=422, detail="Natural language requirement cannot be empty.")
+
     intent.natural_language = intent_in.natural_language
     
     # Re-parse
@@ -413,16 +413,7 @@ def update_intent(intent_id: int, intent_in: IntentUpdate, db: Session = Depends
     db.commit()
     AuditService.log(db, action="UPDATE_INTENT", entity_type="Intent", entity_id=intent.id, details="Intent updated and re-parsed")
     
-    return {
-        "id": intent.id,
-        "natural_language": intent.natural_language,
-        "status": intent.status,
-        "confidence": intent.confidence,
-        "assumptions": intent.assumptions,
-        "created_at": intent.created_at,
-        "updated_at": intent.updated_at,
-        "policies": [{"id": p.id, "intent_id": p.intent_id, "policy_type": p.policy_type} for p in policies]
-    }
+    return serialize_intent(intent, policies)
 
 @router.delete("/{intent_id}")
 def delete_intent(intent_id: int, db: Session = Depends(get_db)):

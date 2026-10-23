@@ -21,6 +21,8 @@ class NetworkGraph:
             )
             
         for link in links:
+            if getattr(link, 'status', 'up') == 'down':
+                continue
             self.graph.add_edge(link.source_device_id, link.target_device_id, link=link)
             self.graph.add_edge(link.target_device_id, link.source_device_id, link=link) # Assuming bidirectional links
             
@@ -81,8 +83,6 @@ class NetworkGraph:
                 continue
         return False
 
-
-
     def is_subnet_match(self, ip_or_subnet, acl_network):
         if acl_network == "any":
             return True
@@ -91,9 +91,52 @@ class NetworkGraph:
         try:
             n1 = ipaddress.ip_network(ip_or_subnet, strict=False)
             n2 = ipaddress.ip_network(acl_network, strict=False)
-            return n1.subnet_of(n2)
+            return n1.subnet_of(n2) or n1.overlaps(n2)
         except ValueError:
             return False
+
+    def check_route_permits(self, device_id, dest_ip):
+        data = self.graph.nodes[device_id]
+        dev_type = data.get('type')
+        config = data.get('config', {})
+        routes = config.get('routes', None)
+
+        if dev_type not in ('router', 'firewall') and routes is None:
+            return True, "Host device - default local gateway"
+
+        if routes is not None:
+            if not routes:
+                dev_name = data.get('name', f"Device {device_id}")
+                return False, f"Missing route: {dev_name} has empty routing table"
+            if dest_ip == "any":
+                return True, "Wildcard destination route match"
+            clean_dest = str(dest_ip).split('/')[0]
+            try:
+                dest_addr = ipaddress.ip_address(clean_dest)
+            except ValueError:
+                return True, f"Non-IP destination {dest_ip}"
+
+            for r in routes:
+                net_str = r.get('network')
+                mask_str = r.get('mask', '255.255.255.255')
+                if not net_str:
+                    continue
+                if net_str == "0.0.0.0" and (mask_str in ("0.0.0.0", "0")):
+                    return True, "Default route 0.0.0.0/0 matched"
+                try:
+                    if mask_str.count('.') == 3:
+                        net_obj = ipaddress.ip_network(f"{net_str}/{mask_str}", strict=False)
+                    else:
+                        net_obj = ipaddress.ip_network(f"{net_str}/{mask_str}", strict=False)
+                    if dest_addr in net_obj:
+                        return True, f"Route found: {net_str}/{mask_str} via {r.get('next_hop', 'direct')}"
+                except ValueError:
+                    continue
+
+            dev_name = data.get('name', f"Device {device_id}")
+            return False, f"Missing route: {dev_name} has no route to destination {dest_ip}"
+
+        return True, "Routing table not enforced"
 
     def check_acl_permits(self, device_id, source_subnet, dest_subnet, protocol=None, port=None):
         data = self.graph.nodes[device_id]
@@ -133,6 +176,15 @@ class NetworkGraph:
                         
         return permit, evidence
 
+    def check_node_permits(self, node, src_ip, dst_ip, protocol=None, port=None):
+        route_ok, route_reason = self.check_route_permits(node, dst_ip)
+        if not route_ok:
+            return False, route_reason
+        acl_ok, acl_reason = self.check_acl_permits(node, src_ip, dst_ip, protocol, port)
+        if not acl_ok:
+            return False, acl_reason
+        return True, acl_reason
+
     def get_all_paths(self, source_zone, dest_zone, source_network=None, destination_network=None):
         src_devices = self.get_devices_in_zone(source_zone, source_network)
         dst_devices = self.get_devices_in_zone(dest_zone, destination_network)
@@ -149,7 +201,6 @@ class NetworkGraph:
 
     def has_permitted_path(self, source_zone, dest_zone, protocol=None, port=None, source_network=None, destination_network=None):
         evidence = self.get_path_evidence(source_zone, dest_zone, protocol, port, source_network, destination_network)
-        # Returns True if at least one fully permitted path exists
         return any(path_info['permitted'] for path_info in evidence)
 
     def get_path_evidence(self, source_zone, dest_zone, protocol=None, port=None, source_network=None, destination_network=None):
@@ -168,7 +219,7 @@ class NetworkGraph:
                 dst_ip = self.graph.nodes[dst].get('ip', 'any')
                 permitted_nodes = [
                     node for node in self.graph.nodes
-                    if self.check_acl_permits(node, src_ip, dst_ip, protocol, port)[0]
+                    if self.check_node_permits(node, src_ip, dst_ip, protocol, port)[0]
                 ]
                 permitted_graph = self.graph.subgraph(permitted_nodes)
                 if src in permitted_graph and dst in permitted_graph and nx.has_path(permitted_graph, src, dst):
@@ -183,7 +234,7 @@ class NetworkGraph:
 
                 hop_evidence = []
                 for hop in path:
-                    permit, reason = self.check_acl_permits(hop, src_ip, dst_ip, protocol, port)
+                    permit, reason = self.check_node_permits(hop, src_ip, dst_ip, protocol, port)
                     hop_evidence.append({
                         "device": self.graph.nodes[hop].get('name'),
                         "device_id": hop,
@@ -199,3 +250,4 @@ class NetworkGraph:
                 })
             
         return evidence_list
+

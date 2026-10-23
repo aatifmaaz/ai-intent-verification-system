@@ -6,228 +6,188 @@ An intelligent network management platform that allows network administrators to
 
 > **Simulation-Based**: This system works entirely with simulated network devices. No physical routers, switches, or cloud infrastructure required.
 
+---
+
 ## 🏗️ System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    React Frontend                        │
-│  Dashboard │ Intents │ Topology │ Verification │ Repair  │
-└─────────────────────┬───────────────────────────────────┘
-                      │ REST API (JSON)
-┌─────────────────────┴───────────────────────────────────┐
-│                  FastAPI Backend                         │
-│  ┌──────────┐ ┌──────────┐ ┌────────────┐ ┌──────────┐ │
-│  │  Intent   │ │  Config  │ │Verification│ │  Repair  │ │
-│  │  Parser   │ │  Parser  │ │  Engine    │ │  Engine  │ │
-│  └──────────┘ └──────────┘ └────────────┘ └──────────┘ │
-│  ┌──────────┐ ┌──────────┐ ┌────────────┐              │
-│  │ Network  │ │ Scenario │ │   Audit    │              │
-│  │  Graph   │ │  Runner  │ │  Service   │              │
-│  └──────────┘ └──────────┘ └────────────┘              │
-│                      │                                   │
-│              SQLAlchemy ORM                              │
-│                      │                                   │
-│              SQLite Database                             │
-└─────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                          React Frontend                                │
+│   Dashboard │ Intents │ Topology │ Verification │ Repairs │ Simulation │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ REST API (JSON)
+┌───────────────────────────────────┴────────────────────────────────────┐
+│                           FastAPI Backend                              │
+│  ┌─────────────────────────┐  ┌──────────────┐  ┌───────────────────┐  │
+│  │   LLM Intent Parser     │  │Config Parser │  │Verification Engine│  │
+│  │ (OpenAI + Deterministic)│  │ (JSON/YAML/  │  │(Graph Reachability│  │
+│  │  Prompt-Injection Guard │  │  Cisco IOS)  │  │  + Route & ACL)   │  │
+│  └─────────────────────────┘  └──────────────┘  └───────────────────┘  │
+│  ┌─────────────────────────┐  ┌──────────────┐  ┌───────────────────┐  │
+│  │      Repair Engine      │  │ScenarioRunner│  │   Audit Service   │  │
+│  │ (Dry-Run Sandbox, Policy│  │ (Scenarios   │  │ (Reversible Ledger│  │
+│  │  Regression Check,      │  │   A thru E)  │  │   & Event Log)    │  │
+│  │  Approval & Rollback)   │  │              │  │                   │  │
+│  └─────────────────────────┘  └──────────────┘  └───────────────────┘  │
+│                                    │                                   │
+│                            SQLAlchemy ORM                              │
+│                                    │                                   │
+│                            SQLite Database                             │
+└────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
 
 ## 🔄 Core Workflow
 
 ```
-Natural Language Intent
+Natural Language Intent (e.g. "Guest must not access HR")
         │
         ▼
-  Intent Parser (Deterministic NLP)
+  LLM Parser / Deterministic Fallback
+  (With prompt-injection defense & Pydantic schema validation)
         │
         ▼
-  Structured Policy (source, dest, protocol, port, action)
+  Structured Policy (source, dest, protocol, port, action, priority)
         │
         ▼
-  Verification Engine (Graph + Rules)
+  Verification Engine (Directed Graph + Static Routes + Ordered ACLs)
         │
-        ├── PASS → Log & Report
-        ├── UNKNOWN → Flag Missing Data
+        ├── PASS → Logged & Recorded
+        ├── UNKNOWN → Flag Missing Data (Empty routes, missing devices)
         └── FAIL → Repair Engine
                       │
                       ▼
-              Generate Minimal Repair
+              Generate Patch Proposal (ACL rule or Static Route)
                       │
                       ▼
-              Validate in Isolation
+              Validate in Isolated Sandbox Topology
                       │
                       ▼
-              Admin Approval Required
+              Regression Check (Verify all existing passing policies)
                       │
                       ▼
-              Apply & Re-verify
+              Human Admin Approval Required
+                      │
+                      ▼
+              Apply to Simulated State (Versioned in Ledger)
+                      │
+                      ▼
+              Re-verify (Confirm Violation Resolved)
+                      │
+                      ▼
+              Optional Rollback (Restores Original Config & State)
 ```
+
+---
 
 ## 🛠️ Technology Stack
 
 | Layer | Technology |
-|-------|-----------|
+|---|---|
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS |
-| Charts | Recharts |
-| Icons | Lucide React |
+| Charts & UI Icons | Recharts, Lucide React |
 | Backend | Python 3.11+, FastAPI, Pydantic v2 |
-| Database | SQLite (dev), SQLAlchemy ORM |
-| Graph Analysis | NetworkX-style graph algorithms |
-| Testing | pytest (backend), Vitest (frontend) |
-| Deployment | Docker, Docker Compose |
+| Database | SQLite, SQLAlchemy ORM (with Foreign Key constraints) |
+| Graph Analysis | NetworkX graph modeling (BFS/DFS, Subgraph path filters) |
+| AI / LLM | OpenAI Python SDK (Structured JSON Outputs) with Fallback |
+| Testing | pytest (52 automated backend tests), Vite build checks |
 
-## 📦 Installation
+---
+
+## 📦 Installation & Setup
 
 ### Prerequisites
 - Python 3.11+
-- Node.js 18+
-- npm or yarn
+- Node.js 18+ and npm 9+
 
 ### Backend Setup
 ```bash
+# Navigate to backend directory
 cd backend
+
+# Create virtual environment
 python -m venv venv
 
-# Windows
-venv\Scripts\activate
-# Linux/Mac
+# Activate virtual environment
+# Windows:
+.\venv\Scripts\activate
+# Linux/macOS:
 source venv/bin/activate
 
+# Install dependencies
 pip install -r requirements.txt
+
+# Configure environment
 cp .env.example .env
 
-# Initialize database with seed data
-python -m app.seed.seed_data
-
-# Start the server
+# Run database migrations and backend server
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+Interactive API Swagger Docs: `http://localhost:8000/docs`
 
 ### Frontend Setup
 ```bash
+# Navigate to frontend directory
 cd frontend
+
+# Install dependencies
 npm install
-cp .env.example .env
 
-# Development
-npm run dev
-
-# Production build
+# Build production bundle
 npm run build
-```
 
-### Docker
+# Start development server
+npm run dev
+```
+Frontend interface: `http://localhost:3000` (or `http://localhost:5173`)
+
+---
+
+## 🧪 Testing & Verification
+
+### Run Automated Backend Test Suite
 ```bash
-docker-compose up --build
+python -m pytest backend/tests -v
+```
+*Current test suite: 52 tests, 100% pass rate.*
+
+### Run Monotonic Performance Benchmark & E2E Lifecycle
+```bash
+# Windows PowerShell:
+$env:PYTHONPATH="backend"; python backend/tests/benchmark_and_e2e.py
+
+# Linux/macOS:
+PYTHONPATH=backend python backend/tests/benchmark_and_e2e.py
 ```
 
-## 🔌 API Endpoints
+---
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | /api/intents | Create and normalize an intent |
-| GET | /api/intents | List stored intents |
-| POST | /api/configurations/import | Import and parse a configuration |
-| GET | /api/topology | Retrieve current topology |
-| POST | /api/verification/run | Execute verification engine |
-| GET | /api/verification/results | Retrieve verification results |
-| POST | /api/repairs/propose | Generate repair proposal |
-| POST | /api/repairs/validate | Validate proposed patch |
-| POST | /api/repairs/{id}/approve | Approve and apply repair |
-| POST | /api/repairs/{id}/rollback | Roll back applied repair |
-| GET | /api/audit-logs | Retrieve audit history |
-| GET | /api/scenarios | List demo scenarios |
-| POST | /api/scenarios/{id}/run | Execute a scenario |
+## 🎬 The Five Demonstration Scenarios
 
-Full API documentation available at: `http://localhost:8000/docs`
+| Scenario | Objective | Initial Verification | Automated Repair Action | Post-Repair Outcome |
+|---|---|---|---|---|
+| **Scenario A** | Guest Isolation Violation | **FAIL** (Path exists through firewall) | Adds ordered `deny ip` ACL rule to `main-firewall` | **PASS** (Traffic blocked) |
+| **Scenario B** | Missing Route | **FAIL** (Empty routing table on router) | Adds missing subnet route `10.0.2.0/24` to router | **PASS** (Path reachable) |
+| **Scenario C** | Unauthorized SSH | **FAIL** (SSH open from any subnet) | Restricts port 22 access to `10.1.40.0/24` | **PASS** (Guest SSH blocked, admin open) |
+| **Scenario D** | Database Exposure | **FAIL** (DB port 5432 exposed to guest) | Adds DB isolation rule on border firewall | **PASS** (DB isolated from guest) |
+| **Scenario E** | Conflicting Intents | **CONFLICT / FAIL** (Contradictory policies) | Flags conflicting policy IDs with explanation | **EXPLAINED** (Requires admin resolution) |
 
-## 🧪 Demo Scenarios
+---
 
-| ID | Scenario | Description |
-|----|----------|-------------|
-| A | Guest Isolation Violation | Guest VLAN can access HR server |
-| B | Missing Route | Engineering can't reach app server |
-| C | Unauthorized SSH Access | Device allows SSH from unauthorized subnet |
-| D | Database Exposure | DB server reachable from guest network |
-| E | Conflicting Intents | Contradictory connectivity policies |
+## 🛡️ Security & Safe Repair Principles
 
-## 🔍 Verification Algorithm
+1. **Deterministic Verification is Authoritative**: Verification never delegates correctness to an LLM. Graph reachability, IP subnet matches, and ordered ACL evaluations are mathematical and deterministic.
+2. **LLM Prompt Injection Defense**: The `LLMIntentParser` actively scans for instruction overrides, privilege escalation keywords, and malicious command injections, blocking adversarial inputs before model execution.
+3. **Sandbox Dry-Run**: Repair patches are applied to an isolated deep copy of the network model before touching simulated device state.
+4. **Zero-Regression Guarantee**: All existing passing policies are automatically re-evaluated in the candidate state. If an existing policy breaks, the repair proposal is rejected.
+5. **Reversible Version Ledger**: Every applied repair archives the preceding configuration version. A single-click rollback restores the previous configuration and verifies state restoration.
+6. **Audit Logging**: All intent submissions, verifications, repair approvals, applications, and rollbacks are persisted with timestamps and entity metadata.
 
-The verification engine uses **deterministic rule-based analysis** combined with **graph-based reachability checks**:
+---
 
-1. **Graph Construction**: Network topology is modeled as a directed graph where devices are nodes and links are edges
-2. **ACL Overlay**: Access control lists are applied as edge filters — a physical link does not imply logical reachability
-3. **Policy Evaluation**: Each policy is checked against the graph:
-   - **DENY/ISOLATE**: BFS/DFS checks that no permitted path exists between source and destination zones
-   - **ALLOW/REQUIRE**: BFS/DFS verifies at least one permitted path exists
-   - **RESTRICT**: Verifies only authorized source networks can reach the destination
-4. **Evidence Collection**: Every check records the specific configuration facts that support the conclusion
+## ⚠️ Scope & Known Limitations
 
-### Why Deterministic Verification?
-
-An LLM cannot reliably determine network correctness because:
-- Network policies require **exact** matching of IP ranges, port numbers, and protocol rules
-- Graph reachability is a **mathematical property** that must be computed, not guessed
-- Safety-critical decisions (blocking traffic, opening ports) must be **reproducible and auditable**
-- Deterministic verification provides **consistent results** across runs
-
-## 🔧 Repair Algorithm
-
-1. **Root Cause Analysis**: Identify which specific configuration element causes the violation
-2. **Minimal Change Generation**: Produce the smallest config change that resolves the issue
-3. **Safety Validation**: Check that the repair doesn't lock out admins, expose restricted services, or create new violations
-4. **Isolated Testing**: Apply repair to a copy of the config and re-run all policies
-5. **Regression Check**: Verify no previously-passing policies now fail
-6. **Human Approval**: Administrator must explicitly approve before changes are committed
-
-## 📁 Project Structure
-
-```
-CN/
-├── backend/
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── config.py
-│   │   ├── database.py
-│   │   ├── models/
-│   │   ├── schemas/
-│   │   ├── api/
-│   │   ├── services/
-│   │   └── seed/
-│   ├── tests/
-│   ├── requirements.txt
-│   └── Dockerfile
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   ├── api/
-│   │   ├── hooks/
-│   │   ├── types/
-│   │   └── utils/
-│   ├── package.json
-│   └── Dockerfile
-├── docker-compose.yml
-└── README.md
-```
-
-## ⚠️ Known Limitations
-
-- **Simulation only**: No real network device integration
-- **Vendor support**: Currently supports JSON/YAML and basic Cisco IOS format
-- **Scale**: SQLite suitable for development; migrate to PostgreSQL for production
-- **AI provider**: LLM integration is optional; deterministic parser handles core intents
-
-## 🚀 Future Enhancements
-
-- PostgreSQL migration for production deployment
-- Real device integration via NETCONF/RESTCONF
-- Multi-vendor config support (Juniper, Arista, Palo Alto)
-- Role-based access control with JWT authentication
-- WebSocket-based real-time notifications
-- Configuration drift monitoring
-- Scheduled verification runs
-- SNMP/streaming telemetry integration
-
-## 📄 License
-
-MIT License - See LICENSE file for details.
+- **Simulated Environment**: Built strictly for network simulation and educational demonstration; does not deploy live packets to physical hardware.
+- **Parser Formats**: Supports JSON, YAML, and Cisco IOS numbered access-lists and static routes. Arbitrary proprietary vendor commands (e.g. BGP confederations, MPLS) report unsupported notices.
+- **Database**: SQLite default is optimized for single-tenant local demonstrations. For multi-user concurrent production setups, PostgreSQL is recommended.

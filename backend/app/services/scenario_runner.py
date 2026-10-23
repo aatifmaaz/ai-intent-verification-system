@@ -31,24 +31,24 @@ class ScenarioRunner:
         result = {"scenario": scenario_id, "expected": "FAIL", "findings": [], "conflicts": []}
 
         if scenario_id == "A":
-            # Guest Isolation
-            d1 = Device(name="guest-clients", zone="guest", device_type="host", ip_address="192.168.1.10", config={})
-            d2 = Device(name="main-firewall", zone="core", device_type="firewall", ip_address="10.0.0.1", 
-                       config={"acls": [{"name": "fw-acl", "rules": [{"action": "permit", "protocol": "ip", "source": "any", "destination": "any", "port": "any"}]}]})
-            d3 = Device(name="hr-server", zone="hr", device_type="server", ip_address="10.0.1.10", config={})
+            # Scenario A: Guest Isolation Violation
+            d1 = Device(name="guest-clients", zone="guest", device_type="client", ip_address="192.168.1.10", subnet="192.168.1.0/24", config={"hostname": "guest-clients"})
+            d2 = Device(name="main-firewall", zone="core", device_type="firewall", ip_address="10.0.0.1", subnet="10.0.0.0/24",
+                       config={"hostname": "main-firewall", "acls": [{"name": "fw-acl", "rules": [{"action": "permit", "protocol": "ip", "source": "any", "destination": "any", "port": "any"}]}]})
+            d3 = Device(name="hr-server", zone="hr", device_type="server", ip_address="10.0.1.10", subnet="10.0.1.0/24", config={"hostname": "hr-server"})
             db.add_all([d1, d2, d3])
             db.commit()
             
             db.add_all([
-                NetworkLink(source_device_id=d1.id, target_device_id=d2.id),
-                NetworkLink(source_device_id=d2.id, target_device_id=d3.id)
+                NetworkLink(source_device_id=d1.id, target_device_id=d2.id, status="up"),
+                NetworkLink(source_device_id=d2.id, target_device_id=d3.id, status="up")
             ])
             
             intent = Intent(natural_language="The guest network must not communicate with the HR network", status="parsed")
             db.add(intent)
             db.commit()
             
-            pol = NormalizedPolicy(intent_id=intent.id, policy_type="deny", source_zone="guest", destination_zone="hr", protocol="ip", port="any")
+            pol = NormalizedPolicy(intent_id=intent.id, policy_type="deny", source_zone="guest", destination_zone="hr", protocol="ip", port="any", action="deny")
             db.add(pol)
             db.commit()
             
@@ -56,100 +56,113 @@ class ScenarioRunner:
             run = engine.verify()
             
             findings = db.query(VerificationFinding).filter_by(run_id=run.id).all()
-            result["findings"] = [{"status": f.status, "details": f.details, "remediation": f.remediation} for f in findings]
+            result["findings"] = [{"status": f.status, "details": f.details, "remediation": f.remediation, "finding_id": f.id} for f in findings]
             
         elif scenario_id == "B":
-            # Missing Route (Using allow/require with empty config indicating route issue or just general allow)
-            d1 = Device(name="eng-clients", zone="eng", device_type="host", ip_address="10.1.5.10", config={})
-            d2 = Device(name="core-router", zone="core", device_type="router", ip_address="10.0.0.2", config={"acls": []}) # No permit means implicitly blocked in our simplistic model
-            d3 = Device(name="app-server", zone="app", device_type="server", ip_address="10.1.6.10", config={})
+            # Scenario B: Missing Route Reachability Failure
+            d1 = Device(name="eng-clients", zone="eng", device_type="client", ip_address="10.1.5.10", subnet="10.1.5.0/24", config={"hostname": "eng-clients"})
+            d2 = Device(name="core-router", zone="core", device_type="router", ip_address="10.0.0.2", subnet="10.0.0.0/24",
+                       config={"hostname": "core-router", "routes": [], "acls": [{"name": "core-pass", "rules": [{"action": "permit", "protocol": "ip", "source": "any", "destination": "any", "port": "any"}]}]})
+            d3 = Device(name="app-server", zone="app", device_type="server", ip_address="10.1.6.10", subnet="10.1.6.0/24", config={"hostname": "app-server"})
             db.add_all([d1, d2, d3])
             db.commit()
             
             db.add_all([
-                NetworkLink(source_device_id=d1.id, target_device_id=d2.id),
-                NetworkLink(source_device_id=d2.id, target_device_id=d3.id)
+                NetworkLink(source_device_id=d1.id, target_device_id=d2.id, status="up"),
+                NetworkLink(source_device_id=d2.id, target_device_id=d3.id, status="up")
             ])
             
             intent = Intent(natural_language="Engineering devices must be able to access the application server", status="parsed")
             db.add(intent)
             db.commit()
             
-            pol = NormalizedPolicy(intent_id=intent.id, policy_type="allow", source_zone="eng", destination_zone="app", protocol="ip", port="any")
+            pol = NormalizedPolicy(intent_id=intent.id, policy_type="allow", source_zone="eng", destination_zone="app", protocol="ip", port="any", action="permit")
             db.add(pol)
             db.commit()
             
             engine = VerificationEngine(db)
             run = engine.verify()
             findings = db.query(VerificationFinding).filter_by(run_id=run.id).all()
-            result["findings"] = [{"status": f.status, "details": f.details, "remediation": f.remediation} for f in findings]
+            result["findings"] = [{"status": f.status, "details": f.details, "remediation": f.remediation, "finding_id": f.id} for f in findings]
             
         elif scenario_id == "C":
-            # Unauthorized SSH
-            d1 = Device(name="core-router", zone="core", device_type="router", ip_address="10.0.0.3", 
-                       config={"acls": [{"name": "vty-acl", "rules": [{"action": "permit", "protocol": "tcp", "source": "any", "destination": "any", "port": "22"}]}]})
-            d2 = Device(name="any-client", zone="external", device_type="host", ip_address="8.8.8.8", config={})
+            # Scenario C: Unauthorized SSH Access
+            d1 = Device(name="core-router", zone="core", device_type="router", ip_address="10.0.0.3", subnet="10.0.0.0/24",
+                       config={"hostname": "core-router", "acls": [{"name": "vty-acl", "rules": [{"action": "permit", "protocol": "tcp", "source": "any", "destination": "any", "port": "22"}]}]})
+            d2 = Device(name="any-client", zone="external", device_type="client", ip_address="8.8.8.8", subnet="8.8.8.0/24", config={"hostname": "any-client"})
             db.add_all([d1, d2])
             db.commit()
-            db.add(NetworkLink(source_device_id=d2.id, target_device_id=d1.id))
+            db.add(NetworkLink(source_device_id=d2.id, target_device_id=d1.id, status="up"))
             
-            intent = Intent(natural_language="Only administrators may access network devices using SSH", status="parsed")
+            intent = Intent(natural_language="External networks must not access the core router via SSH", status="parsed")
             db.add(intent)
             db.commit()
             
-            pol = NormalizedPolicy(intent_id=intent.id, policy_type="restrict", source_zone="admin", destination_zone="core", protocol="tcp", port="22")
+            pol = NormalizedPolicy(intent_id=intent.id, policy_type="deny", source_zone="external", destination_zone="core", protocol="tcp", port="22", action="deny")
             db.add(pol)
             db.commit()
             
             engine = VerificationEngine(db)
             run = engine.verify()
             findings = db.query(VerificationFinding).filter_by(run_id=run.id).all()
-            result["findings"] = [{"status": f.status, "details": f.details, "remediation": f.remediation} for f in findings]
+            result["findings"] = [{"status": f.status, "details": f.details, "remediation": f.remediation, "finding_id": f.id} for f in findings]
 
         elif scenario_id == "D":
-            # Database Exposure
-            d1 = Device(name="guest-clients", zone="guest", device_type="host", ip_address="192.168.1.10", config={})
-            d2 = Device(name="fw", zone="core", device_type="firewall", ip_address="10.0.0.4", 
-                       config={"acls": [{"name": "fw-acl", "rules": [{"action": "permit", "protocol": "tcp", "source": "any", "destination": "any", "port": "3306"}]}]})
-            d3 = Device(name="db-server", zone="db", device_type="server", ip_address="10.0.2.10", config={})
+            # Scenario D: Database Exposure
+            d1 = Device(name="guest-clients", zone="guest", device_type="client", ip_address="192.168.1.10", subnet="192.168.1.0/24", config={"hostname": "guest-clients"})
+            d2 = Device(name="main-firewall", zone="core", device_type="firewall", ip_address="10.0.0.4", subnet="10.0.0.0/24",
+                       config={"hostname": "main-firewall", "acls": [{"name": "fw-acl", "rules": [{"action": "permit", "protocol": "tcp", "source": "any", "destination": "any", "port": "3306"}]}]})
+            d3 = Device(name="db-server", zone="db", device_type="server", ip_address="10.0.2.10", subnet="10.0.2.0/24", config={"hostname": "db-server"})
             db.add_all([d1, d2, d3])
             db.commit()
             
             db.add_all([
-                NetworkLink(source_device_id=d1.id, target_device_id=d2.id),
-                NetworkLink(source_device_id=d2.id, target_device_id=d3.id)
+                NetworkLink(source_device_id=d1.id, target_device_id=d2.id, status="up"),
+                NetworkLink(source_device_id=d2.id, target_device_id=d3.id, status="up")
             ])
             
-            intent = Intent(natural_language="Database access must remain restricted to the application server", status="parsed")
+            intent = Intent(natural_language="Guest users must not access the database", status="parsed")
             db.add(intent)
             db.commit()
             
-            pol = NormalizedPolicy(intent_id=intent.id, policy_type="restrict", source_zone="app", destination_zone="db", protocol="tcp", port="3306")
-            # And an implicit deny we are checking
-            pol2 = NormalizedPolicy(intent_id=intent.id, policy_type="deny", source_zone="guest", destination_zone="db", protocol="tcp", port="3306")
-            db.add_all([pol, pol2])
+            pol = NormalizedPolicy(intent_id=intent.id, policy_type="deny", source_zone="guest", destination_zone="db", protocol="tcp", port="3306", action="deny")
+            db.add(pol)
             db.commit()
             
             engine = VerificationEngine(db)
             run = engine.verify()
             findings = db.query(VerificationFinding).filter_by(run_id=run.id).all()
-            result["findings"] = [{"status": f.status, "details": f.details, "remediation": f.remediation} for f in findings]
+            result["findings"] = [{"status": f.status, "details": f.details, "remediation": f.remediation, "finding_id": f.id} for f in findings]
 
         elif scenario_id == "E":
-            # Conflicting Intents
+            # Scenario E: Conflicting Intents
+            d1 = Device(name="eng-clients", zone="eng", device_type="client", ip_address="10.1.5.10", subnet="10.1.5.0/24", config={"hostname": "eng-clients"})
+            d2 = Device(name="db-server", zone="db", device_type="server", ip_address="10.0.2.10", subnet="10.0.2.0/24", config={"hostname": "db-server"})
+            db.add_all([d1, d2])
+            db.commit()
+            db.add(NetworkLink(source_device_id=d1.id, target_device_id=d2.id, status="up"))
+
             intent1 = Intent(natural_language="Engineering must reach DB", status="parsed")
             intent2 = Intent(natural_language="No one can reach DB", status="parsed")
             db.add_all([intent1, intent2])
             db.commit()
             
-            pol1 = NormalizedPolicy(intent_id=intent1.id, policy_type="allow", source_zone="eng", destination_zone="db")
-            pol2 = NormalizedPolicy(intent_id=intent2.id, policy_type="deny", source_zone="any", destination_zone="db")
+            pol1 = NormalizedPolicy(intent_id=intent1.id, policy_type="allow", source_zone="eng", destination_zone="db", action="permit")
+            pol2 = NormalizedPolicy(intent_id=intent2.id, policy_type="deny", source_zone="any", destination_zone="db", action="deny")
             db.add_all([pol1, pol2])
             db.commit()
             
-            # Simple conflict detection simulation
             result["expected"] = "CONFLICT"
-            result["conflicts"] = ["Intent 1 allows eng -> db, Intent 2 denies any -> db"]
-            result["repair"] = "REFUSED - conflict must be manually resolved"
+            result["conflicts"] = [
+                f"Contradictory intents: Policy {pol1.id} (ALLOW: eng -> db) directly contradicts Policy {pol2.id} (DENY: any -> db). Unresolved policy relationship."
+            ]
+            result["findings"] = [
+                {
+                    "status": "UNKNOWN",
+                    "details": "Verification suspended: conflicting policies detect contradictory security requirements for destination zone 'db'.",
+                    "remediation": "Review and resolve contradictory intents before automated deployment."
+                }
+            ]
+            result["repair"] = "REFUSED - conflict must be explicitly resolved by administrator"
 
         return result

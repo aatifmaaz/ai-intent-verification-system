@@ -1,12 +1,7 @@
 import pytest
-from fastapi.testclient import TestClient
-from app.main import app
-from app.database import get_db
 from app.models.intent import Intent, NormalizedPolicy
 
-client = TestClient(app)
-
-def test_system_status():
+def test_system_status(client):
     response = client.get("/api/system/status")
     assert response.status_code == 200
     data = response.json()
@@ -14,7 +9,7 @@ def test_system_status():
     assert "devices_count" in data
     assert "engine_version" in data
 
-def test_list_scenarios():
+def test_list_scenarios(client):
     response = client.get("/api/scenarios/")
     assert response.status_code == 200
     scenarios = response.json()
@@ -22,7 +17,7 @@ def test_list_scenarios():
     assert scenarios[0]["id"] == "A"
     assert "Zero-Trust" in scenarios[0]["category"]
 
-def test_run_scenario_a_and_reset():
+def test_run_scenario_a_and_reset(client):
     # Run Scenario A
     run_resp = client.post("/api/scenarios/A/run")
     assert run_resp.status_code == 200
@@ -35,7 +30,7 @@ def test_run_scenario_a_and_reset():
     assert reset_resp.status_code == 200
     assert reset_resp.json()["success"] is True
 
-def test_configurations_validate():
+def test_configurations_validate(client):
     valid_payload = {
         "format": "json",
         "content": '{"hostname": "router-test", "acls": []}'
@@ -44,13 +39,13 @@ def test_configurations_validate():
     assert resp.status_code == 200
     assert resp.json()["valid"] is True
 
-def test_audit_logs_search():
+def test_audit_logs_search(client):
     resp = client.get("/api/audit-logs/?limit=10")
     assert resp.status_code == 200
     logs = resp.json()
     assert isinstance(logs, list)
 
-def test_auto_enforce_intent():
+def test_auto_enforce_intent(client):
     resp = client.post("/api/intents/auto-enforce", json={
         "natural_language": "The guest network must not communicate with the HR network."
     })
@@ -59,21 +54,18 @@ def test_auto_enforce_intent():
     assert data["status"] in ["REMEDIATED", "COMPLIANT"]
     assert len(data["steps"]) >= 3
 
-def test_update_intent_reparses_policy(db_session):
-    app.dependency_overrides[get_db] = lambda: db_session
+def test_update_intent_reparses_policy(client, db_session):
     intent = Intent(natural_language="Guest users must not communicate with HR", status="parsed")
     db_session.add(intent)
     db_session.commit()
-    try:
-        response = TestClient(app).put(f"/api/intents/{intent.id}", json={
-            "natural_language": "Engineering should have access to the application server"
-        })
-        assert response.status_code == 200
-        policy = db_session.query(NormalizedPolicy).filter_by(intent_id=intent.id).one()
-        assert policy.policy_type == "allow"
-        assert policy.action == "permit"
-        assert policy.source_zone == "engineering"
-        assert policy.destination_zone == "application"
-    finally:
-        app.dependency_overrides.pop(get_db, None)
+    response = client.put(f"/api/intents/{intent.id}", json={
+        "natural_language": "Engineering should have access to the application server"
+    })
+    assert response.status_code == 200
+    policy = db_session.query(NormalizedPolicy).filter_by(intent_id=intent.id).one()
+    assert policy.policy_type == "allow"
+    assert policy.action == "permit"
+    assert policy.source_zone == "engineering"
+    assert policy.destination_zone == "application"
+
 

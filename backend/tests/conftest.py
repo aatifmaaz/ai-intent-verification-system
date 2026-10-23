@@ -2,9 +2,11 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from fastapi.testclient import TestClient
 import app.models  # Register all models in Base.metadata
-from app.database import Base
+from app.database import Base, get_db
 from app.seed.seed_data import seed_db
+from app.main import app
 
 TEST_DATABASE_URL = "sqlite:///:memory:"
 
@@ -24,3 +26,12 @@ def db_session():
     finally:
         session.close()
         Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+@pytest.fixture
+def client(db_session):
+    app.dependency_overrides[get_db] = lambda: db_session
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.pop(get_db, None)
+
