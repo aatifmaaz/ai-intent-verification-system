@@ -13,6 +13,9 @@ router = APIRouter()
 intent_parser = IntentParser()
 llm_intent_parser = LLMIntentParser(deterministic_parser=intent_parser)
 
+def get_llm_parser() -> LLMIntentParser:
+    return LLMIntentParser(deterministic_parser=intent_parser)
+
 
 class IntentCreate(BaseModel):
     natural_language: str
@@ -62,11 +65,15 @@ def serialize_intent(intent: Intent, policies: List[NormalizedPolicy]) -> dict:
     }
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
-def create_intent(intent_in: IntentCreate, db: Session = Depends(get_db)):
+def create_intent(
+    intent_in: IntentCreate, 
+    db: Session = Depends(get_db),
+    parser: LLMIntentParser = Depends(get_llm_parser)
+):
     if not intent_in.natural_language or not intent_in.natural_language.strip():
         raise HTTPException(status_code=422, detail="Natural language requirement cannot be empty.")
 
-    parsed_result = llm_intent_parser.parse(intent_in.natural_language, db=db)
+    parsed_result = parser.parse(intent_in.natural_language, db=db)
     if not parsed_result.get("policies") or parsed_result.get("status") in ["unsupported", "needs_clarification"]:
         raise HTTPException(status_code=422, detail=parsed_result.get("assumptions") or "I couldn't identify a valid network rule in that sentence. Specify source and destination zones or networks.")
 
@@ -106,12 +113,16 @@ def create_intent(intent_in: IntentCreate, db: Session = Depends(get_db)):
     return serialize_intent(new_intent, policies)
 
 @router.post("/auto-enforce")
-def auto_enforce_intent(intent_in: IntentCreate, db: Session = Depends(get_db)):
+def auto_enforce_intent(
+    intent_in: IntentCreate, 
+    db: Session = Depends(get_db),
+    parser: LLMIntentParser = Depends(get_llm_parser)
+):
     from app.services.verification_engine import VerificationEngine
     from app.services.repair_engine import RepairEngine
     from app.models.verification import VerificationFinding
 
-    parsed_result = llm_intent_parser.parse(intent_in.natural_language, db=db)
+    parsed_result = parser.parse(intent_in.natural_language, db=db)
     if not parsed_result.get("policies") or parsed_result.get("status") in ["unsupported", "needs_clarification"]:
         raise HTTPException(status_code=422, detail=parsed_result.get("assumptions") or "I couldn't identify a network rule in that sentence. Specify which network or device should be allowed or blocked from which destination.")
 

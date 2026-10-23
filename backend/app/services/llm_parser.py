@@ -57,9 +57,33 @@ Safety rules:
 
 class LLMIntentParser:
     def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, deterministic_parser: Optional[IntentParser] = None):
-        self.api_key = api_key or settings.openai_api_key
-        self.model = model or settings.openai_model or "gpt-4o-mini"
+        self._api_key = api_key
+        self._model = model
         self.deterministic_parser = deterministic_parser or IntentParser()
+
+    @property
+    def api_key(self) -> Optional[str]:
+        if self._api_key is not None:
+            return self._api_key
+        import app.services.llm_parser as _mod
+        current_settings = getattr(_mod, "settings", settings)
+        return current_settings.openai_api_key
+
+    @api_key.setter
+    def api_key(self, value: Optional[str]):
+        self._api_key = value
+
+    @property
+    def model(self) -> str:
+        if self._model is not None:
+            return self._model
+        import app.services.llm_parser as _mod
+        current_settings = getattr(_mod, "settings", settings)
+        return current_settings.openai_model or "gpt-4o-mini"
+
+    @model.setter
+    def model(self, value: Optional[str]):
+        self._model = value
 
     def _is_prompt_injection(self, text: str) -> bool:
         lower = text.lower()
