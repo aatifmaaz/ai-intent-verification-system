@@ -1,6 +1,5 @@
 from sqlalchemy import Column, Integer, String, JSON, DateTime
-from datetime import datetime
-from ..database import Base
+from ..database import Base, utc_now
 
 class AuditEvent(Base):
     __tablename__ = "audit_events"
@@ -10,4 +9,4 @@ class AuditEvent(Base):
     description = Column(String)
     user_id = Column(Integer, nullable=True)
     details = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)

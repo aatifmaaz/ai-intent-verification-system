@@ -1,4 +1,4 @@
-from datetime import datetime
+from app.database import utc_now
 import json
 from sqlalchemy import or_
 from app.models import Device, NetworkLink, Intent, NormalizedPolicy, VerificationRun, VerificationFinding
@@ -19,7 +19,7 @@ class VerificationEngine:
         )
 
         run = VerificationRun(
-            started_at=datetime.utcnow(),
+            started_at=utc_now(),
             total_policies=len(policies),
             status="running"
         )
@@ -42,7 +42,7 @@ class VerificationEngine:
                 unknown += 1
             self.db.add(finding)
 
-        run.completed_at = datetime.utcnow()
+        run.completed_at = utc_now()
         run.passed = passed
         run.failed = failed
         run.unknown = unknown

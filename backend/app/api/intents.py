@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
-from app.database import get_db
+from app.database import get_db, utc_now
 from app.models.intent import Intent, NormalizedPolicy
 from app.services.intent_parser import IntentParser
 from app.services.llm_parser import LLMIntentParser
@@ -141,7 +141,7 @@ def auto_enforce_intent(intent_in: IntentCreate, db: Session = Depends(get_db)):
         db.commit()
         AuditService.log(db, action="CREATE_INTENT", entity_type="Intent", entity_id=new_intent.id, details=f"Auto-pilot initiated for: {new_intent.natural_language}")
     else:
-        new_intent.updated_at = datetime.utcnow()
+        new_intent.updated_at = utc_now()
         if new_intent.status == "archived":
             new_intent.status = "parsed"
     if reused_existing:

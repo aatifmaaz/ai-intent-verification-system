@@ -17,6 +17,12 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
         except Exception:
             pass
 
+from datetime import datetime, timezone
+
+def utc_now() -> datetime:
+    """Return current timezone-aware UTC datetime."""
+    return datetime.now(timezone.utc)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

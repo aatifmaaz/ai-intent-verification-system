@@ -14,7 +14,7 @@ from app.models.configuration import NetworkConfiguration, ConfigurationVersion
 from app.models.verification import VerificationRun, VerificationFinding
 from app.models.repair import RepairProposal
 from app.models.audit import AuditEvent
-from app.database import SessionLocal, engine, Base
+from app.database import SessionLocal, engine, Base, utc_now
 
 
 def reset_demo_data(db: Session):
@@ -395,8 +395,8 @@ def seed_db(db: Session):
             status=item["status"],
             confidence=item["confidence"],
             assumptions=item["assumptions"],
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=utc_now(),
+            updated_at=utc_now()
         )
         db.add(intent)
         db.flush()

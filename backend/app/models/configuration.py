@@ -1,6 +1,5 @@
 from sqlalchemy import Column, Integer, String, JSON, DateTime, Boolean
-from datetime import datetime
-from ..database import Base
+from ..database import Base, utc_now
 
 class NetworkConfiguration(Base):
     __tablename__ = "network_configurations"
@@ -12,7 +11,7 @@ class NetworkConfiguration(Base):
     normalized_content = Column(JSON)
     version = Column(Integer)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
 class ConfigurationVersion(Base):
     __tablename__ = "configuration_versions"
@@ -23,4 +22,4 @@ class ConfigurationVersion(Base):
     config_data = Column(JSON)
     change_description = Column(String)
     created_by = Column(Integer)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)

@@ -1,6 +1,5 @@
 from sqlalchemy import Column, Integer, String, Float, JSON, DateTime
-from datetime import datetime
-from ..database import Base
+from ..database import Base, utc_now
 
 class Intent(Base):
     __tablename__ = "intents"
@@ -10,8 +9,8 @@ class Intent(Base):
     status = Column(String, default="draft") # draft/parsed/active/archived
     confidence = Column(Float)
     assumptions = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 class NormalizedPolicy(Base):
     __tablename__ = "normalized_policies"

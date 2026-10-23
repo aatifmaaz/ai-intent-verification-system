@@ -2,6 +2,7 @@ import json
 import copy
 import ipaddress
 from datetime import datetime
+from app.database import utc_now
 from app.models import RepairProposal, VerificationFinding, Intent, NormalizedPolicy, Device, NetworkLink, ConfigurationVersion
 from app.services.network_graph import NetworkGraph
 from app.services.verification_engine import VerificationEngine
@@ -275,14 +276,14 @@ class RepairEngine:
                     version_number=version_count + 1,
                     config_data=dev.config,
                     change_description=proposal.description,
-                    created_at=datetime.utcnow()
+                    created_at=utc_now()
                 )
                 self.db.add(version)
                 dev.config = proposal.proposed_config
                 
         proposal.approval_status = "approved"
-        proposal.approved_at = datetime.utcnow()
-        proposal.applied_at = datetime.utcnow()
+        proposal.approved_at = utc_now()
+        proposal.applied_at = utc_now()
         self.db.commit()
 
         try:
@@ -307,13 +308,13 @@ class RepairEngine:
                     version_number=version_count + 1,
                     config_data=dev.config,
                     change_description=f"Rollback of proposal {proposal.id}: {proposal.description}",
-                    created_at=datetime.utcnow()
+                    created_at=utc_now()
                 )
                 self.db.add(version)
                 dev.config = proposal.original_config
                 
         proposal.approval_status = "rolled_back"
-        proposal.rolled_back_at = datetime.utcnow()
+        proposal.rolled_back_at = utc_now()
         self.db.commit()
 
         try:

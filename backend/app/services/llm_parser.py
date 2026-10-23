@@ -163,8 +163,17 @@ class LLMIntentParser:
             return det_result
 
         except Exception as e:
-            logger.warning(f"LLM service call failed: {type(e).__name__}. Falling back to deterministic parser.")
+            err_name = type(e).__name__
+            if "RateLimit" in err_name:
+                detail = "LLM API quota exhausted or rate limit hit"
+            elif "Authentication" in err_name:
+                detail = "LLM API authentication failed"
+            elif "Timeout" in err_name:
+                detail = "LLM API request timed out"
+            else:
+                detail = f"LLM provider unavailable ({err_name})"
+            logger.warning(f"LLM service call failed: {err_name}. Falling back to deterministic parser.")
             det_result = self.deterministic_parser.parse(nl, db=db)
             det_result["interpreter"] = "deterministic_fallback"
-            det_result["assumptions"] = f"LLM provider unavailable ({type(e).__name__}). Fallback to deterministic parser applied."
+            det_result["assumptions"] = f"{detail}. Fallback to deterministic parser applied."
             return det_result

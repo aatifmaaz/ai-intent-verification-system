@@ -1,12 +1,11 @@
 from sqlalchemy import Column, Integer, String, JSON, DateTime
-from datetime import datetime
-from ..database import Base
+from ..database import Base, utc_now
 
 class VerificationRun(Base):
     __tablename__ = "verification_runs"
 
     id = Column(Integer, primary_key=True, index=True)
-    started_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, default=utc_now)
     completed_at = Column(DateTime, nullable=True)
     total_policies = Column(Integer, default=0)
     passed = Column(Integer, default=0)

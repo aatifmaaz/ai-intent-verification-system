@@ -1,4 +1,4 @@
-from datetime import datetime
+from app.database import utc_now
 from app.models import AuditEvent
 import json
 
@@ -10,7 +10,7 @@ class AuditService:
             description=description,
             user_id=user_id,
             details=details if details else {},
-            created_at=datetime.utcnow()
+            created_at=utc_now()
         )
         db.add(event)
         db.commit()
