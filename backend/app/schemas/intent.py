@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -22,8 +22,7 @@ class NormalizedPolicyResponse(BaseModel):
     priority: int
     conditions: Optional[Dict[str, Any]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class IntentResponse(IntentBase):
     id: int
@@ -34,5 +33,4 @@ class IntentResponse(IntentBase):
     updated_at: datetime
     policies: List[NormalizedPolicyResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

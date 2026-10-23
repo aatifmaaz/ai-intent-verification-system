@@ -159,12 +159,12 @@ class LLMIntentParser:
             logger.warning(f"LLM response failed schema validation: {ve}")
             det_result = self.deterministic_parser.parse(nl, db=db)
             det_result["interpreter"] = "deterministic_fallback"
-            det_result["assumptions"] = f"LLM schema validation failed ({str(ve)}). Fallback to deterministic parser applied."
+            det_result["assumptions"] = "LLM response schema validation failed. Fallback to deterministic parser applied."
             return det_result
 
         except Exception as e:
-            logger.warning(f"LLM service call failed: {e}. Falling back to deterministic parser.")
+            logger.warning(f"LLM service call failed: {type(e).__name__}. Falling back to deterministic parser.")
             det_result = self.deterministic_parser.parse(nl, db=db)
             det_result["interpreter"] = "deterministic_fallback"
-            det_result["assumptions"] = f"LLM unavailable ({str(e)}). Fallback to deterministic parser applied."
+            det_result["assumptions"] = f"LLM provider unavailable ({type(e).__name__}). Fallback to deterministic parser applied."
             return det_result

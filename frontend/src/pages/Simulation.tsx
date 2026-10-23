@@ -13,7 +13,8 @@ import {
   ArrowRight, 
   Zap, 
   Server, 
-  Activity
+  Activity,
+  AlertTriangle
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -334,42 +335,98 @@ export const Simulation: React.FC = () => {
               </div>
 
               {/* Simulation Result Box */}
-              {scenarioResult && (
-                <div className="p-5 rounded-xl border border-red-500/30 bg-red-950/20 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5 text-red-400 font-bold text-sm">
-                      <ShieldAlert className="w-5 h-5 flex-shrink-0" />
-                      <span>Policy Breach Verified: {scenarioResult.findings.length} Violation Finding(s) Identified</span>
+              {scenarioResult && (() => {
+                const isConflict = Boolean((scenarioResult.conflicts && scenarioResult.conflicts.length > 0) || scenarioResult.expected === 'CONFLICT');
+                return (
+                  <div className={`p-5 rounded-xl border space-y-4 ${
+                    isConflict 
+                      ? 'border-purple-500/40 bg-purple-950/25' 
+                      : 'border-red-500/30 bg-red-950/20'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div className={`flex items-center gap-2.5 font-bold text-sm ${
+                        isConflict ? 'text-purple-300' : 'text-red-400'
+                      }`}>
+                        {isConflict ? (
+                          <AlertTriangle className="w-5 h-5 flex-shrink-0 text-purple-400" />
+                        ) : (
+                          <ShieldAlert className="w-5 h-5 flex-shrink-0 text-red-400" />
+                        )}
+                        <span>
+                          {isConflict 
+                            ? 'Policy Contradiction Detected: Automated Repair Refused' 
+                            : `Policy Breach Verified: ${scenarioResult.findings.length} Violation Finding(s) Identified`}
+                        </span>
+                      </div>
+
+                      <span className={`px-2.5 py-0.5 rounded font-mono text-xs font-bold border ${
+                        isConflict 
+                          ? 'bg-purple-500/20 text-purple-300 border-purple-500/50' 
+                          : 'bg-red-500/20 text-red-300 border-red-500/40'
+                      }`}>
+                        {isConflict ? 'STATUS: CONFLICT / INDETERMINATE' : 'STATUS: FAIL'}
+                      </span>
                     </div>
 
-                    <span className="px-2.5 py-0.5 rounded font-mono text-xs font-bold bg-red-500/20 text-red-300 border border-red-500/40">
-                      STATUS: FAIL
-                    </span>
-                  </div>
-
-                  {scenarioResult.findings.map((f, idx) => (
-                    <div key={idx} className="p-3 bg-slate-900/90 rounded-lg border border-slate-800 text-xs space-y-2">
-                      <div className="text-slate-200 font-mono leading-relaxed">{f.details}</div>
-                      {f.remediation && (
-                        <div className="text-emerald-400 font-medium flex items-center gap-2">
-                          <CheckCircle className="w-4 h-4 flex-shrink-0" />
-                          <span>Remediation Advice: {f.remediation}</span>
+                    {/* Conflict Explanation Box */}
+                    {isConflict && scenarioResult.conflicts && scenarioResult.conflicts.length > 0 && (
+                      <div className="p-3.5 bg-purple-950/40 rounded-lg border border-purple-500/40 space-y-2">
+                        <div className="text-xs font-bold text-purple-200 uppercase tracking-wider flex items-center gap-2">
+                          <AlertTriangle className="w-3.5 h-3.5 text-purple-400" />
+                          Contradictory Policy Explanation
                         </div>
+                        {scenarioResult.conflicts.map((c, idx) => (
+                          <div key={idx} className="text-xs font-mono text-purple-200/90 leading-relaxed pl-1">
+                            • {c}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {scenarioResult.findings.map((f, idx) => (
+                      <div key={idx} className="p-3 bg-slate-900/90 rounded-lg border border-slate-800 text-xs space-y-2">
+                        <div className="text-slate-200 font-mono leading-relaxed">{f.details}</div>
+                        {f.remediation && (
+                          <div className={`font-medium flex items-center gap-2 ${
+                            isConflict ? 'text-purple-300' : 'text-emerald-400'
+                          }`}>
+                            <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                            <span>Remediation Advice: {f.remediation}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+
+                    {/* Safety Guardrail Notice */}
+                    {scenarioResult.repair && (
+                      <div className="p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-xs text-slate-400 font-mono">
+                        <span className="text-amber-400 font-bold">🛡️ Repair Guardrail: </span>
+                        {scenarioResult.repair}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-end pt-2">
+                      {isConflict ? (
+                        <Link
+                          to="/intents"
+                          className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-purple-600/20 transition-all"
+                        >
+                          Review & Clarify Contradictory Intents
+                          <ArrowRight className="w-4 h-4" />
+                        </Link>
+                      ) : (
+                        <Link
+                          to="/repairs"
+                          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-emerald-600/20 transition-all"
+                        >
+                          Review & Apply Automated Patch in Repair Center
+                          <ArrowRight className="w-4 h-4" />
+                        </Link>
                       )}
                     </div>
-                  ))}
-
-                  <div className="flex items-center justify-end pt-2">
-                    <Link
-                      to="/repairs"
-                      className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-emerald-600/20 transition-all"
-                    >
-                      Review & Apply Automated Patch in Repair Center
-                      <ArrowRight className="w-4 h-4" />
-                    </Link>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
           )}
         </div>

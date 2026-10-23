@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List, Dict, Any
 
 class DeviceBase(BaseModel):
@@ -18,5 +18,4 @@ class DeviceResponse(DeviceBase):
     id: int
     config: Optional[Dict[str, Any]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

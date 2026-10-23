@@ -111,3 +111,61 @@ def test_llm_parser_mocked_openai_api_error_fallback():
             assert len(res["policies"]) > 0
             assert res["policies"][0]["source_zone"] == "guest"
             assert res["policies"][0]["action"] == "deny"
+
+
+def test_llm_parser_incomplete_endpoints_needs_clarification():
+    with patch("app.services.llm_parser.settings", Settings(openai_api_key="sk-test-mock-key", openai_model="gpt-4o")):
+        mock_openai_module = MagicMock()
+        mock_client = MagicMock()
+        mock_openai_module.OpenAI.return_value = mock_client
+        mock_completion = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = """{
+            "status": "parsed",
+            "confidence": 0.5,
+            "assumptions": "Vague intent",
+            "policies": [
+                {
+                    "policy_type": "allow",
+                    "action": "permit",
+                    "source_zone": null,
+                    "destination_zone": null
+                }
+            ]
+        }"""
+        mock_completion.choices = [mock_choice]
+        mock_client.chat.completions.create.return_value = mock_completion
+        with patch.dict("sys.modules", {"openai": mock_openai_module}):
+            parser = LLMIntentParser()
+            res = parser.parse("Please allow something somewhere")
+            assert res["status"] == "needs_clarification"
+            assert res["policies"] == []
+
+
+def test_llm_parser_invalid_policy_type_fallback():
+    with patch("app.services.llm_parser.settings", Settings(openai_api_key="sk-test-mock-key", openai_model="gpt-4o")):
+        mock_openai_module = MagicMock()
+        mock_client = MagicMock()
+        mock_openai_module.OpenAI.return_value = mock_client
+        mock_completion = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = """{
+            "status": "parsed",
+            "confidence": 0.9,
+            "assumptions": "Unsupported policy action",
+            "policies": [
+                {
+                    "policy_type": "unsupported_magic_protocol",
+                    "action": "destroy",
+                    "source_zone": "guest",
+                    "destination_zone": "hr"
+                }
+            ]
+        }"""
+        mock_completion.choices = [mock_choice]
+        mock_client.chat.completions.create.return_value = mock_completion
+        with patch.dict("sys.modules", {"openai": mock_openai_module}):
+            parser = LLMIntentParser()
+            res = parser.parse("Guest must not access HR")
+            assert res["interpreter"] == "deterministic_fallback"
+            assert res["policies"][0]["action"] == "deny"

@@ -154,7 +154,8 @@ export interface ScenarioResult {
     details?: string;
     remediation?: string;
   }>;
-  conflicts?: unknown[];
+  conflicts?: string[];
+  repair?: string;
 }
 
 export interface NetworkConfiguration {

@@ -60,12 +60,12 @@ SCENARIO_METADATA = [
         "id": "E",
         "name": "Conflicting Intent Policies",
         "category": "Policy Conflict Resolution",
-        "severity": "MEDIUM",
-        "description": "Two conflicting network policies exist simultaneously (ALLOW vs ISOLATE) on the database zone, creating ambiguity.",
-        "affected_zones": ["guest", "database"],
-        "target_devices": ["guest-clients", "db-server"],
-        "expected_result": "FAIL",
-        "attack_vector": "Ambiguous security policy creating unpredictable firewall enforcement"
+        "severity": "HIGH",
+        "description": "Two contradictory network policies exist simultaneously: Engineering must reach DB (ALLOW) vs No one can reach DB (DENY any->db), creating security ambiguity.",
+        "affected_zones": ["eng", "core", "database"],
+        "target_devices": ["eng-clients", "db-server"],
+        "expected_result": "CONFLICT",
+        "attack_vector": "Contradictory security requirements creating ambiguous and dangerous policy indeterminacy"
     }
 ]
 
