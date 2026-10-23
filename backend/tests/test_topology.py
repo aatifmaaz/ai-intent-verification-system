@@ -1,17 +1,11 @@
 import pytest
-from fastapi.testclient import TestClient
-from app.main import app
-from app.database import get_db
 from app.models.device import Device
 from app.models.network_link import NetworkLink
 from app.models.intent import Intent
 from app.services.verification_engine import VerificationEngine
-from app.services.intent_parser import IntentParser
 
-def test_get_topology_templates(db_session):
-    app.dependency_overrides[get_db] = lambda: db_session
-    client = TestClient(app)
-    
+
+def test_get_topology_templates(client):
     response = client.get("/api/topology/templates")
     assert response.status_code == 200
     templates = response.json()
@@ -22,10 +16,8 @@ def test_get_topology_templates(db_session):
     assert "healthcare" in template_ids
     assert "fintech" in template_ids
 
-def test_load_topology_template(db_session):
-    app.dependency_overrides[get_db] = lambda: db_session
-    client = TestClient(app)
-    
+
+def test_load_topology_template(client, db_session):
     # Load Datacenter template
     response = client.post("/api/topology/templates/datacenter/load")
     assert response.status_code == 200
@@ -47,10 +39,8 @@ def test_load_topology_template(db_session):
     run = engine.verify()
     assert run.status == "completed"
 
-def test_import_custom_new_topology(db_session):
-    app.dependency_overrides[get_db] = lambda: db_session
-    client = TestClient(app)
-    
+
+def test_import_custom_new_topology(client, db_session):
     custom_topology_payload = {
         "name": "Smart Campus IoT Mesh",
         "devices": [
@@ -102,10 +92,8 @@ def test_import_custom_new_topology(db_session):
     assert "intent" in auto_data
     assert auto_data["intent"]["natural_language"] == "Isolate the IoT sensor hub completely from analytics server"
 
-def test_add_dynamic_device(db_session):
-    app.dependency_overrides[get_db] = lambda: db_session
-    client = TestClient(app)
-    
+
+def test_add_dynamic_device(client, db_session):
     device_payload = {
         "name": "edge-accelerator-01",
         "device_type": "server",

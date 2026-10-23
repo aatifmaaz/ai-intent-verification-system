@@ -87,3 +87,83 @@ def test_duplicate_apply_and_rollback_guard(db_session):
     # Double rollback rejected
     assert r_engine.rollback_repair(proposal.id) is False
 
+
+def test_proposal_does_not_mutate_active_config(db_session):
+    from app.models.device import Device
+    v_engine = VerificationEngine(db_session)
+    run1 = v_engine.verify()
+    fail_finding = db_session.query(VerificationFinding).filter(
+        VerificationFinding.run_id == run1.id,
+        VerificationFinding.status == "FAIL"
+    ).first()
+
+    r_engine = RepairEngine(db_session)
+    target_dev = db_session.query(Device).filter(Device.device_type.in_(["firewall", "router"])).first()
+    original_config_before = dict(target_dev.config)
+
+    proposal = r_engine.propose_repair(fail_finding.id)
+    assert proposal is not None
+
+    # Verify device config in DB remains completely unchanged before approval
+    db_session.refresh(target_dev)
+    assert target_dev.config == original_config_before
+
+
+def test_regression_detection_rejects_breaking_repair(db_session):
+    from app.models.intent import Intent, NormalizedPolicy
+
+    # Create a passing policy that traverses main-firewall: dmz to guest
+    intent = Intent(natural_language="DMZ must access Guest network", status="parsed")
+    db_session.add(intent)
+    db_session.commit()
+    pass_pol = NormalizedPolicy(
+        intent_id=intent.id, policy_type="allow",
+        source_zone="dmz", destination_zone="guest",
+        protocol="ip", port="any", action="permit"
+    )
+    db_session.add(pass_pol)
+    db_session.commit()
+
+    v_engine = VerificationEngine(db_session)
+    run1 = v_engine.verify()
+    fail_finding = db_session.query(VerificationFinding).filter(
+        VerificationFinding.run_id == run1.id,
+        VerificationFinding.status == "FAIL"
+    ).first()
+
+    r_engine = RepairEngine(db_session)
+    proposal = r_engine.propose_repair(fail_finding.id)
+    assert proposal is not None
+
+    # Case 1: Proposal that fails to satisfy target policy (explicitly allows violation)
+    proposal.proposed_config = {
+        "acls": [{
+            "name": "still-broken",
+            "rules": [
+                {"action": "permit", "protocol": "ip", "source": "10.1.30.0/24", "destination": "10.1.10.0/24", "port": "any"}
+            ]
+        }]
+    }
+    db_session.commit()
+    val_res1 = r_engine.validate_repair(proposal.id)
+    assert val_res1["valid"] is False
+    assert proposal.validation_status == "invalid"
+    assert r_engine.apply_repair(proposal.id) is False
+
+    # Case 2: Proposal that fixes target policy but introduces regression on passing policy (blocks dmz to guest)
+    proposal.proposed_config = {
+        "acls": [{
+            "name": "fixes-target-breaks-others",
+            "rules": [
+                {"action": "deny", "protocol": "ip", "source": "10.1.30.0/24", "destination": "10.1.10.0/24", "port": "any"},
+                {"action": "deny", "protocol": "ip", "source": "10.1.70.0/24", "destination": "10.1.30.0/24", "port": "any"}
+            ]
+        }]
+    }
+    db_session.commit()
+    val_res2 = r_engine.validate_repair(proposal.id)
+    assert val_res2["valid"] is False
+    assert "break existing policy" in val_res2.get("error", "")
+    assert proposal.validation_status == "invalid"
+    assert r_engine.apply_repair(proposal.id) is False
+

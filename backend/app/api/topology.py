@@ -76,7 +76,7 @@ def get_topology(db: Session = Depends(get_db)):
 @router.post("/devices", status_code=status.HTTP_201_CREATED)
 @router.post("/device", status_code=status.HTTP_201_CREATED)
 def create_device(device_in: DeviceCreate, db: Session = Depends(get_db)):
-    device = Device(**device_in.dict())
+    device = Device(**device_in.model_dump())
     db.add(device)
     db.commit()
     db.refresh(device)
@@ -88,7 +88,7 @@ def update_device(device_id: int, device_in: DeviceCreate, db: Session = Depends
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     
-    for k, v in device_in.dict().items():
+    for k, v in device_in.model_dump().items():
         setattr(device, k, v)
     
     db.commit()
@@ -108,7 +108,7 @@ def delete_device(device_id: int, db: Session = Depends(get_db)):
 
 @router.post("/links", status_code=status.HTTP_201_CREATED)
 def create_link(link_in: LinkCreate, db: Session = Depends(get_db)):
-    link = NetworkLink(**link_in.dict())
+    link = NetworkLink(**link_in.model_dump())
     db.add(link)
     db.commit()
     db.refresh(link)
